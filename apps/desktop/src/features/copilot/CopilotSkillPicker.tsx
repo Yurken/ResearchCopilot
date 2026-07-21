@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Lock, LockOpen, X, Zap } from "lucide-react";
+import { Lock, LockOpen, Wrench, X, Zap } from "lucide-react";
 import type { Skill } from "@research-copilot/types";
 
 interface CopilotSkillPickerProps {
@@ -110,8 +110,15 @@ export default function CopilotSkillPicker({
                       fontWeight: selectedSkillId === skill.id ? 600 : 400,
                     }}
                   >
-                    <Zap className="w-3 h-3 flex-shrink-0 opacity-60" />
+                    {skill.kind === "tool" ? (
+                      <Wrench className="w-3 h-3 flex-shrink-0 opacity-60" />
+                    ) : (
+                      <Zap className="w-3 h-3 flex-shrink-0 opacity-60" />
+                    )}
                     <span className="truncate">{skill.title}</span>
+                    {skill.kind === "tool" ? (
+                      <span className="ml-auto text-[10px] opacity-60">工具</span>
+                    ) : null}
                   </button>
                 ))
               )}

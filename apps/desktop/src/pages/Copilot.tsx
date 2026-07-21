@@ -129,8 +129,8 @@ export default function Copilot({ hideFolders = false }: { hideFolders?: boolean
   // Skills
   useEffect(() => {
     apiClient.skills.list().then((data) => {
-      // 对话技能选择器只收提示词技能；工具技能（如 PPT 生成）走工具页专用流程。
-      setSkills(data.filter((s) => s.is_enabled && s.kind !== "tool"));
+      // 对话技能选择器展示所有已启用技能；工具技能（如 PPT 生成）走 Tool Registry 执行真实工具。
+      setSkills(data.filter((s) => s.is_enabled));
     }).catch((err) => { console.warn("Failed to load skills:", err); });
   }, []);
 

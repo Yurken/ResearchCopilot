@@ -12,6 +12,7 @@ import { MarkdownRenderer } from "@research-copilot/ui";
 import { MAIN_ASSISTANT_WELCOME_DESCRIPTION, MAIN_ASSISTANT_WELCOME_DESCRIPTION_DIRECT, MAIN_ASSISTANT_WELCOME_TITLE } from "@research-copilot/types";
 import ThinkingProcessPanel from "./ThinkingProcessPanel";
 import { ToolActionCard } from "./ToolActionCard";
+import { ArtifactCard } from "../artifacts/ArtifactCard";
 import appLogo from "../../assets/xiaoyanv.svg";
 import { parseCopilotMessageContent } from "./shared";
 import { openLink } from "../../lib/links";
@@ -164,6 +165,13 @@ export function CopilotChatArea(props: CopilotChatAreaProps) {
                   <div className="flex flex-wrap gap-2 mt-2">
                     {message.tool_results.map((tr) => (
                       <ToolActionCard key={tr.tool_id} tool={tr} />
+                    ))}
+                  </div>
+                )}
+                {message.artifacts && message.artifacts.length > 0 && (
+                  <div className="mt-2 space-y-2">
+                    {message.artifacts.map((artifact) => (
+                      <ArtifactCard key={artifact.id} artifact={artifact} />
                     ))}
                   </div>
                 )}

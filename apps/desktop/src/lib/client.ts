@@ -8,6 +8,8 @@ import type {
   ArxivRankingMode,
   ArxivSearchRequest,
   ArxivSearchResponse,
+  Artifact,
+  ArtifactKind,
   CcfListResponse,
   CcfLookupResponse,
   GithubProjectSearchResponse,
@@ -15,6 +17,7 @@ import type {
   JournalLookupResponse,
   SourceLookupResponse,
   Paper,
+  ChatMessage,
   ChatSession,
   ResearchInterest,
   ResearchInterestProfile,
@@ -584,6 +587,32 @@ export const chatApi = {
       contextType: interestId ? "interest" : "general",
       contextId: interestId ?? null,
     }),
+  ensureSession: (options: {
+    sessionId?: string;
+    title?: string;
+    contextType?: string;
+    contextId?: string;
+  }): Promise<ChatSession> =>
+    invoke("chat_ensure_session", {
+      sessionId: options.sessionId ?? null,
+      title: options.title ?? null,
+      contextType: options.contextType ?? null,
+      contextId: options.contextId ?? null,
+    }),
+  saveMessage: (input: {
+    session_id: string;
+    role: "user" | "assistant";
+    content: string;
+    images?: unknown;
+    artifacts?: unknown;
+  }): Promise<ChatMessage> =>
+    invoke("chat_save_message", {
+      sessionId: input.session_id,
+      role: input.role,
+      content: input.content,
+      images: input.images ?? null,
+      artifacts: input.artifacts ?? null,
+    }),
   listAgentRuns: (sessionId: string, requestId?: string): Promise<AgentRun[]> =>
     invoke("chat_list_agent_runs", { sessionId, requestId: requestId ?? null }),
   stream: streamChat,
@@ -1147,6 +1176,26 @@ export const activeResearcherApi = {
     invoke("active_researcher_mark_read", { id: id ?? null }),
 };
 
+export const artifactApi = {
+  save: (input: {
+    id: string;
+    kind: ArtifactKind;
+    name: string;
+    title?: string;
+    description?: string;
+    bytes: number[];
+    metadata?: Record<string, unknown>;
+  }): Promise<Artifact> => invoke("artifact_save", input),
+  open: (id: string, localPath: string): Promise<void> =>
+    invoke("artifact_open", { id, localPath }),
+  reveal: (id: string, localPath: string): Promise<void> =>
+    invoke("artifact_reveal", { id, localPath }),
+  saveAs: (id: string, localPath: string): Promise<boolean> =>
+    invoke("artifact_save_as", { id, localPath }),
+  delete: (id: string, localPath: string): Promise<void> =>
+    invoke("artifact_delete", { id, localPath }),
+};
+
 export const apiClient = {
   fieldDynamics: fieldDynamicsApi,
   memory: memoryApi,
@@ -1176,4 +1225,5 @@ export const apiClient = {
   evidence: evidenceApi,
   crossAnalysis: crossAnalysisApi,
   activeResearcher: activeResearcherApi,
+  artifact: artifactApi,
 };
