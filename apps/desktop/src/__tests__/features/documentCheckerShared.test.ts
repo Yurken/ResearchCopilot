@@ -14,7 +14,9 @@ const reference: DocumentInspection = {
   marginsMm: { top: 30, right: 30, bottom: 30, left: 30 },
   fonts: ["黑体", "宋体"],
   fontSizesPt: [10.5, 12, 16],
-  text: "文稿采用 A4 纸。页边距均为 2.5 cm，正文使用宋体小四号。全文不得超过 10 页。",
+  fontUsage: [{ value: "宋体", characters: 1000 }],
+  fontSizeUsage: [{ value: 12, characters: 1000 }],
+  text: "文稿采用 A4 纵向纸。页边距均为 2.5 cm，正文使用宋体小四号。全文不得超过 10 页。",
   pageNumbers: [1, 2, 3, 4],
   blankPages: [],
   hasComments: false,
@@ -30,8 +32,11 @@ const candidate: DocumentInspection = {
   marginsMm: { top: 25, right: 25, bottom: 25, left: 25 },
   fonts: ["宋体", "Times New Roman"],
   fontSizesPt: [10.5, 12, 16],
+  fontUsage: [{ value: "宋体", characters: 1000 }],
+  fontSizeUsage: [{ value: 12, characters: 1000 }],
   text: "图 1 方法框架\n图 2 实验结果\n正文引用 [1]\n参考文献\n[1] 示例文献",
   pageNumbers: [1, 2, 3, 4, 5, 6, 7, 8],
+  pageNumberEvidence: "rendered",
   blankPages: [],
   hasComments: false,
   hasRevisions: false,
@@ -53,8 +58,15 @@ describe("规范文档与成稿比对", () => {
   it("两份文档格式一致时生成逐项通过结果", () => {
     const report = compareDocuments(reference, candidate);
 
-    expect(report.comparisons).toHaveLength(5);
-    expect(report.comparisons.every((item) => item.status === "match")).toBe(true);
+    expect(report.comparisons).toHaveLength(6);
+    expect(report.comparisons.map((item) => [item.id, item.status])).toEqual([
+      ["comparison-page-size", "match"],
+      ["comparison-page-orientation", "match"],
+      ["comparison-margins", "match"],
+      ["comparison-fonts", "match"],
+      ["comparison-font-size", "match"],
+      ["comparison-page-limit", "match"],
+    ]);
     expect(report.passed).toContain("纸张尺寸与规范文档一致");
     expect(report.issues.some((issue) => issue.id.startsWith("comparison-"))).toBe(false);
   });
@@ -68,6 +80,8 @@ describe("规范文档与成稿比对", () => {
       marginsMm: { top: 15, right: 15, bottom: 15, left: 15 },
       fonts: ["Arial"],
       fontSizesPt: [10],
+      fontUsage: [{ value: "Arial", characters: 1000 }],
+      fontSizeUsage: [{ value: 10, characters: 1000 }],
     });
 
     expect(report.comparisons.filter((item) => item.status === "mismatch")).toHaveLength(5);
@@ -91,13 +105,21 @@ describe("规范文档与成稿比对", () => {
     expect(report.issues.some((issue) => issue.category === "hidden" && issue.severity === "error")).toBe(true);
   });
 
-  it("规范正文没有明确要求时回退到规范文档自身版式", () => {
+  it("投稿指南没有明确要求时不再回退到文档自身版式", () => {
     const profile = deriveReferenceProfile({ ...reference, text: "投稿说明" });
+
+    expect(profile.marginsMm).toBeNull();
+    expect(profile.fonts).toEqual([]);
+    expect(profile.marginBasis).toBe("规范正文未明确要求");
+    expect(profile.fontBasis).toBe("规范正文未明确要求");
+  });
+
+  it("官方模板模式可以显式采信文档自身版式", () => {
+    const profile = deriveReferenceProfile({ ...reference, text: "投稿说明" }, "template");
 
     expect(profile.marginsMm).toEqual(reference.marginsMm);
     expect(profile.fonts).toEqual(reference.fonts);
-    expect(profile.marginBasis).toBe("规范文档版式");
-    expect(profile.fontBasis).toBe("规范文档使用字体");
+    expect(profile.marginBasis).toBe("模板文档版式");
   });
 
   it("分别提取规范中的四边页边距", () => {
@@ -108,5 +130,61 @@ describe("规范文档与成稿比对", () => {
 
     expect(profile.marginsMm).toEqual({ top: 20, right: 25, bottom: 30, left: 25 });
     expect(profile.marginBasis).toBe("规范文档明确要求");
+  });
+
+  it("解析英文一英寸页边距", () => {
+    const profile = deriveReferenceProfile({
+      ...reference,
+      text: "Use A4 portrait paper with all margins 1 inch.",
+    });
+
+    expect(profile.marginsMm).toEqual({ top: 25.4, right: 25.4, bottom: 25.4, left: 25.4 });
+  });
+
+  it("A4 横向成稿不会被当成与纵向规范一致", () => {
+    const report = compareDocuments(reference, {
+      ...candidate,
+      pageWidthMm: 297,
+      pageHeightMm: 210,
+    });
+
+    expect(report.comparisons.find((item) => item.id === "comparison-page-size")?.status).toBe("match");
+    expect(report.comparisons.find((item) => item.id === "comparison-page-orientation")?.status).toBe("mismatch");
+  });
+
+  it("少量目标字体或字号不会让正文检查通过", () => {
+    const report = compareDocuments(reference, {
+      ...candidate,
+      fontUsage: [
+        { value: "宋体", characters: 50 },
+        { value: "Arial", characters: 950 },
+      ],
+      fontSizeUsage: [
+        { value: 12, characters: 50 },
+        { value: 11, characters: 950 },
+      ],
+    });
+
+    expect(report.comparisons.find((item) => item.id === "comparison-fonts")?.status).toBe("mismatch");
+    expect(report.comparisons.find((item) => item.id === "comparison-font-size")?.status).toBe("mismatch");
+  });
+
+  it("无图表时标记不适用而不是通过", () => {
+    const report = compareDocuments(reference, { ...candidate, text: "正文内容" });
+
+    expect(report.passed).not.toContain("图表编号未发现明显断档");
+    expect(report.notices).toContainEqual(expect.objectContaining({ category: "figure", status: "not_applicable" }));
+  });
+
+  it("DOCX PAGE 域只标记待确认，不视为页码连续", () => {
+    const report = compareDocuments(reference, {
+      ...candidate,
+      fileType: "docx",
+      pageNumbers: [],
+      pageNumberEvidence: "field_only",
+    });
+
+    expect(report.passed).not.toContain("页码序列未发现明显断档");
+    expect(report.notices).toContainEqual(expect.objectContaining({ category: "page", status: "unavailable" }));
   });
 });

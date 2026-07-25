@@ -2,6 +2,7 @@ import type { WebSearchItem } from "@research-copilot/types";
 
 export type DisclosureStatus = "private" | "submitted" | "public";
 export type PatentRiskLevel = "low" | "medium" | "high" | "unknown";
+export type PatentEvidenceQuality = "web_clue";
 
 export interface PatentSearchPlan {
   features: string[];
@@ -12,6 +13,8 @@ export interface PatentSearchPlan {
 export interface PatentSearchResult extends WebSearchItem {
   publicationNumber: string;
   relevanceScore: number;
+  evidenceQuality: PatentEvidenceQuality;
+  sourceVerified: boolean;
 }
 
 export interface PatentabilityReport {
@@ -21,6 +24,7 @@ export interface PatentabilityReport {
   summary: string;
   arguablePoints: string[];
   nextSteps: string[];
+  evidenceSummary: string;
 }
 
 const FEATURE_SPLIT = /[\n,，;；、|]+/;
@@ -65,31 +69,49 @@ function extractPublicationNumber(value: string): string {
 
 export function rankPatentResults(items: WebSearchItem[], plan: PatentSearchPlan): PatentSearchResult[] {
   const featureTokens = normalizedTokens(plan.features.join(" "));
-  return items
+  const ranked = items
     .map((item) => {
       const haystack = `${item.title} ${item.snippet} ${item.url}`.toLocaleLowerCase();
       const matched = featureTokens.filter((token) => haystack.includes(token.toLocaleLowerCase())).length;
       const relevanceScore = featureTokens.length > 0 ? matched / featureTokens.length : 0;
+      const publicationNumber = extractPublicationNumber(`${item.title} ${item.url} ${item.snippet}`);
+      let sourceVerified = false;
+      try {
+        sourceVerified = new URL(item.url).hostname === "patents.google.com" && Boolean(publicationNumber);
+      } catch {
+        sourceVerified = false;
+      }
       return {
         ...item,
-        publicationNumber: extractPublicationNumber(`${item.title} ${item.url} ${item.snippet}`),
+        publicationNumber,
         relevanceScore,
+        evidenceQuality: "web_clue" as const,
+        sourceVerified,
       };
     })
     .sort((left, right) => right.relevanceScore - left.relevanceScore);
+
+  const deduplicated = new Map<string, PatentSearchResult>();
+  for (const item of ranked) {
+    const normalizedUrl = item.url.split(/[?#]/)[0].replace(/\/$/, "").toLocaleLowerCase();
+    const key = item.publicationNumber || normalizedUrl;
+    if (!deduplicated.has(key)) deduplicated.set(key, item);
+  }
+  return [...deduplicated.values()];
 }
 
 export function buildPatentabilityReport(
   results: PatentSearchResult[],
   disclosureStatus: DisclosureStatus,
 ): PatentabilityReport {
-  const highest = results[0]?.relevanceScore ?? 0;
-  const noveltyRisk: PatentRiskLevel = results.length === 0 ? "unknown" : highest >= 0.7 ? "high" : highest >= 0.35 ? "medium" : "low";
-  const inventivenessRisk: PatentRiskLevel = results.length === 0 ? "unknown" : highest >= 0.5 ? "high" : "medium";
+  const verifiedResults = results.filter((item) => item.sourceVerified);
+  const highest = verifiedResults[0]?.relevanceScore ?? 0;
+  const noveltyRisk: PatentRiskLevel = highest >= 0.7 ? "high" : highest >= 0.35 ? "medium" : "unknown";
+  const inventivenessRisk: PatentRiskLevel = highest >= 0.5 ? "high" : highest >= 0.35 ? "medium" : "unknown";
   const disclosureRisk: PatentRiskLevel = disclosureStatus === "public" ? "high" : disclosureStatus === "submitted" ? "medium" : "low";
 
-  const summary = results.length === 0
-    ? "当前公开网络结果不足，不能据此判断新颖性，建议扩大关键词并在官方专利数据库复核。"
+  const summary = verifiedResults.length === 0 || highest < 0.35
+    ? "当前只有公开网络线索，或可核验公开号的特征命中不足，无法据此判断新颖性与创造性。"
     : highest >= 0.7
       ? "发现与多数技术特征重叠的公开结果，新颖性风险偏高，应逐项比对权利要求和公开日。"
       : "暂未发现覆盖全部特征的高重叠结果，但仍需继续检索同义词、分类号和非专利文献。";
@@ -109,6 +131,7 @@ export function buildPatentabilityReport(
       "逐篇阅读最接近结果的独立权利要求，而不只看标题与摘要",
       "公开论文、答辩、展会或开源前，与专利代理师确认申请时点",
     ],
+    evidenceSummary: `${results.length} 条网页线索，其中 ${verifiedResults.length} 条识别到 Google Patents 来源与中国公开号；未读取完整权利要求。`,
   };
 }
 
@@ -129,7 +152,7 @@ ${description}
 关键技术特征：${plan.features.join("；")}
 披露状态：${disclosureStatus}
 
-公开检索片段：
+公开网络线索（仅标题与摘要片段，不是完整权利要求）：
 ${evidence || "暂无结果"}
 
 请依次给出：

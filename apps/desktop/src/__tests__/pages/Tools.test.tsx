@@ -13,7 +13,6 @@ vi.mock("../../features/tools/useArxivFieldSearch", () => ({
 
 vi.mock("../../features/tools/usePaperDiscoverySearch", () => ({
   usePaperDiscoverySearch: () => ({
-    // Tools.tsx 读取并 .trim() 这些字段拼接网络补充 seed，必须是字符串。
     panelProps: {
       topic: "",
       allTerms: "",
@@ -78,17 +77,6 @@ vi.mock("../../features/tools/useGithubProjectSearch", () => ({
   }),
 }));
 
-vi.mock("../../features/tools/useWebSupplement", () => ({
-  // Tools.tsx 解构 outcome/loading/error/searched/run（非 panelProps 形态）。
-  useWebSupplement: () => ({
-    outcome: null,
-    loading: false,
-    error: "",
-    searched: false,
-    run: vi.fn(),
-  }),
-}));
-
 // Mock panel components
 vi.mock("../../features/tools/ArxivFieldSearchPanel", () => ({
   ArxivFieldSearchPanel: () => <div data-testid="arxiv-field-panel">arXiv 字段检索</div>,
@@ -113,9 +101,6 @@ vi.mock("../../features/tools/PptWorkspace", () => ({
 }));
 vi.mock("../../features/tools/FriendLinksPanel", () => ({
   FriendLinksPanel: () => <div data-testid="friend-links-panel">科研友链</div>,
-}));
-vi.mock("../../features/tools/WebSupplementPanel", () => ({
-  WebSupplementPanel: () => <div data-testid="web-supplement-panel">网页补充</div>,
 }));
 vi.mock("../../features/patent-tool/PatentWorkspace", () => ({
   default: () => <div data-testid="patent-workspace">专利工具</div>,

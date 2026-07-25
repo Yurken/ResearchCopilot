@@ -164,13 +164,14 @@ pub async fn code_send_message(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     session_id: String,
-    content: String,
+    display_content: String,
+    prompt_content: String,
     working_dir: Option<String>,
     current_file: Option<String>,
     mode: Option<String>,
     user_message_id: Option<String>,
 ) -> Result<(), String> {
-    if content.trim().is_empty() {
+    if display_content.trim().is_empty() || prompt_content.trim().is_empty() {
         return Err("消息不能为空".into());
     }
 
@@ -184,7 +185,7 @@ pub async fn code_send_message(
             .map_err(|err| err.to_string())?;
     }
 
-    code::store::maybe_autotitle(&db, &session_id, &content).await;
+    code::store::maybe_autotitle(&db, &session_id, &display_content).await;
     let _ = app.emit(
         "code:title_changed",
         serde_json::json!({ "session_id": &session_id }),
@@ -202,7 +203,8 @@ pub async fn code_send_message(
             db,
             settings,
             session_id,
-            content,
+            display_content,
+            prompt_content,
             working_dir,
             current_file,
             mode,

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import type { ExperimentRecord, ExperimentCodeSession } from "@research-copilot/types";
 import { CapsuleTabs } from "@research-copilot/ui";
-import { experimentApi } from "../lib/client";
+import { experimentApi, formatErrorMessage } from "../lib/client";
 import { useDomainEventRefresh } from "../hooks/useDomainEventRefresh";
 import { ExperimentCodeWorkspace } from "../features/experiment/ExperimentCodeWorkspace";
 import { ExperimentSnapshotPanel } from "../features/experiment/ExperimentSnapshotPanel";
@@ -10,29 +10,9 @@ import { ExperimentRecordPanel } from "../features/experiment/ExperimentRecordPa
 import { useExperimentWorkingDirectory } from "../features/experiment/useExperimentWorkingDirectory";
 import { EXPERIMENT_MODULES, type ExperimentModuleKey } from "../features/module-visibility/shared";
 import { useModuleVisibility } from "../features/module-visibility/useModuleVisibility";
+import { mapExperimentRecord } from "../features/experiment/shared";
 
 type ExperimentTab = ExperimentModuleKey;
-
-function rowToExperiment(row: unknown): ExperimentRecord {
-  const r = row as Record<string, unknown>;
-  let config: Record<string, unknown> = {};
-  try {
-    config = typeof r.config === "string"
-      ? JSON.parse(r.config)
-      : (r.config as Record<string, unknown>) ?? {};
-  } catch (err) { console.warn("Failed to parse experiment config:", err); }
-  return {
-    id: String(r.id ?? ""),
-    title: String(r.title ?? ""),
-    config,
-    result: String(r.result ?? ""),
-    notes: String(r.notes ?? ""),
-    linkedSubmissionId: r.linkedSubmissionId ? String(r.linkedSubmissionId) : null,
-    defaultWorkingDir: r.defaultWorkingDir ? String(r.defaultWorkingDir) : null,
-    createdAt: String(r.createdAt ?? r.created_at ?? ""),
-    updatedAt: String(r.updatedAt ?? r.updated_at ?? ""),
-  };
-}
 
 interface ExperimentProps {
   experimentId?: string;
@@ -47,35 +27,36 @@ export default function Experiment({ experimentId }: ExperimentProps) {
 
   const [activeTab, setActiveTab] = useState<ExperimentTab>("records");
   const [activeCodeSession, setActiveCodeSession] = useState<ExperimentCodeSession | null>(null);
-  const [workingDir, setWorkingDir] = useExperimentWorkingDirectory(
-    experiment?.id ?? null,
-    experiment?.defaultWorkingDir ?? null,
-  );
-
   const showToast = useCallback((message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(""), 2500);
   }, []);
 
+  const [workingDir, setWorkingDir] = useExperimentWorkingDirectory(
+    experiment?.id ?? null,
+    experiment?.defaultWorkingDir ?? null,
+    showToast,
+  );
+
   const loadExperiment = useCallback(async () => {
     try {
       let record: ExperimentRecord | null = null;
       if (experimentId) {
-        record = rowToExperiment(await experimentApi.get(experimentId));
+        record = mapExperimentRecord(await experimentApi.get(experimentId));
       } else {
         const result = await experimentApi.list();
-        record = (result.experiments ?? []).map(rowToExperiment)[0] ?? null;
+        record = (result.experiments ?? []).map(mapExperimentRecord)[0] ?? null;
       }
       setExperiment(record);
-    } catch {
-      // keep existing data on refresh failure
+    } catch (error) {
+      showToast(`加载实验失败：${formatErrorMessage(error)}`);
     }
-  }, [experimentId]);
+  }, [experimentId, showToast]);
 
   const refreshActiveExperiment = useCallback(async () => {
     if (!experiment?.id) return;
     try {
-      setExperiment(rowToExperiment(await experimentApi.get(experiment.id)));
+      setExperiment(mapExperimentRecord(await experimentApi.get(experiment.id)));
     } catch {
       showToast("恢复成功，但实验记录刷新失败，请重新进入页面");
     }

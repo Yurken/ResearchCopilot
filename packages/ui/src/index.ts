@@ -3,6 +3,7 @@ export { default as IconButton } from "./IconButton";
 export { Card, CardHeader, CardTitle, CardSection, CardSectionTitle } from "./Card";
 export { default as Badge } from "./Badge";
 export { Input, Textarea } from "./Input";
+export { default as DatePicker } from "./DatePicker";
 export { default as Select } from "./Select";
 export { default as Modal } from "./Modal";
 export { default as ConfirmDialog } from "./ConfirmDialog";

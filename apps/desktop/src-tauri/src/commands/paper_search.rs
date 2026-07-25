@@ -1,17 +1,19 @@
 use crate::ccf::match_venue;
-use crate::llm::{resolve_model, resolve_temperature, LlmClient, LlmMessage};
+use crate::commands::paper_search_plan::plan_paper_search_queries;
+use crate::llm::{resolve_temperature, LlmClient, LlmMessage};
 use crate::semantic_scholar::throttle_semantic_scholar_request;
 use crate::state::AppState;
 use anyhow::Context;
-use chrono::{Datelike, Utc};
+use chrono::{Duration as ChronoDuration, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sqlx::Row;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use tauri::State;
 
 const SEMANTIC_SCHOLAR_API_URL: &str = "https://api.semanticscholar.org/graph/v1/paper/search";
-const SEMANTIC_SCHOLAR_USER_AGENT: &str = "xiaoyan-desktop/0.5.1";
+const SEMANTIC_SCHOLAR_USER_AGENT: &str = "xiaoyan-desktop/0.5.2";
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case", default)]
@@ -159,7 +161,10 @@ struct PaperSearchResponse {
     keywords: Vec<String>,
     applied_filters: PaperSearchRequest,
     search_expression: String,
-    days: i64,
+    search_queries: Vec<String>,
+    query_plan_llm_used: bool,
+    query_plan_note: String,
+    cutoff_date: String,
     limit: usize,
     ranking_mode: String,
     candidate_count: usize,
@@ -189,11 +194,23 @@ struct LlmRankingPaper {
     tags: Option<Vec<String>>,
 }
 
+fn normalize_cutoff_date(value: Option<&str>, today: NaiveDate) -> Result<String, String> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(today.format("%Y-%m-%d").to_string());
+    };
+    let cutoff = NaiveDate::parse_from_str(value, "%Y-%m-%d")
+        .map_err(|_| "截止日期格式无效，请使用 YYYY-MM-DD".to_string())?;
+    if cutoff > today {
+        return Err("截止日期不能晚于今天".to_string());
+    }
+    Ok(cutoff.format("%Y-%m-%d").to_string())
+}
+
 #[tauri::command]
 pub async fn paper_search(
     state: State<'_, AppState>,
     request: PaperSearchRequest,
-    days: Option<i64>,
+    cutoff_date: Option<String>,
     limit: Option<i32>,
     ranking_mode: Option<String>,
 ) -> Result<serde_json::Value, String> {
@@ -202,24 +219,56 @@ pub async fn paper_search(
         return Err("请至少填写一个检索条件".into());
     }
 
-    let day_window = days.unwrap_or(14).clamp(1, 3650);
+    let cutoff_date = normalize_cutoff_date(cutoff_date.as_deref(), Local::now().date_naive())?;
     let result_limit = limit.unwrap_or(6).clamp(1, 50) as usize;
     let mode = RankingMode::from_value(ranking_mode.as_deref());
     let settings = state.settings.read().await.clone();
 
     let query = describe_request(&request);
     let keywords = collect_keywords(&request);
-    let search_expression = build_search_query(&request);
+    let structured_terms = collect_structured_search_terms(&request);
+    let search_plan = plan_paper_search_queries(&settings, &request.topic, &structured_terms).await;
+    if search_plan.queries.is_empty() {
+        return Err("无法从当前输入生成有效检索式，请补充更具体的自然语言需求或关键词".into());
+    }
+    let search_expression = search_plan.queries.join("\n");
 
-    let candidates = fetch_semantic_scholar_candidates(
-        &settings,
-        &search_expression,
-        &request.exclude_terms,
-        day_window,
-        candidate_pool_size(result_limit),
-    )
-    .await
-    .map_err(|error| error.to_string())?;
+    let publication_date_range = format!(":{cutoff_date}");
+    let mut candidates = Vec::new();
+    let mut seen_candidates = HashSet::new();
+    let mut successful_queries = 0usize;
+    let mut last_search_error = None;
+    for search_query in &search_plan.queries {
+        match fetch_semantic_scholar_candidates_with_date_range(
+            &settings,
+            search_query,
+            &request.exclude_terms,
+            Some(&publication_date_range),
+            candidate_pool_size(result_limit),
+        )
+        .await
+        {
+            Ok(query_candidates) => {
+                successful_queries += 1;
+                for candidate in query_candidates {
+                    let key = if candidate.id.trim().is_empty() {
+                        format!("title:{}", candidate.title.trim().to_lowercase())
+                    } else {
+                        format!("id:{}", candidate.id)
+                    };
+                    if seen_candidates.insert(key) {
+                        candidates.push(candidate);
+                    }
+                }
+            }
+            Err(error) => last_search_error = Some(error),
+        }
+    }
+    if successful_queries == 0 {
+        return Err(last_search_error
+            .map(|error| error.to_string())
+            .unwrap_or_else(|| "联网学术检索失败".to_string()));
+    }
 
     if candidates.is_empty() {
         let empty = PaperSearchResponse {
@@ -227,13 +276,17 @@ pub async fn paper_search(
             keywords,
             applied_filters: request.clone(),
             search_expression,
-            days: day_window,
+            search_queries: search_plan.queries,
+            query_plan_llm_used: search_plan.llm_used,
+            query_plan_note: search_plan.note,
+            cutoff_date,
             limit: result_limit,
             ranking_mode: mode.as_str().to_string(),
             candidate_count: 0,
             llm_used: false,
             ranking_note: "未检索到匹配论文。".into(),
-            overall_summary: "可以放宽关键词、增加时间窗口，或减少排除词后重试。".into(),
+            overall_summary: "可以精简自然语言需求、补充关键词、放宽领域筛选或减少排除词后重试。"
+                .into(),
             disclaimer: "检索结果来自联网学术数据源，覆盖范围与实时性受第三方接口影响。".into(),
             papers: Vec::new(),
         };
@@ -244,6 +297,7 @@ pub async fn paper_search(
     let heuristic = heuristic_rank_papers(
         &candidates,
         &request,
+        &search_plan.queries,
         mode,
         candidates.len().max(result_limit),
     );
@@ -252,12 +306,24 @@ pub async fn paper_search(
             .await
         {
             Ok(Some((note, summary, ranked))) => (true, note, summary, ranked),
-            Ok(None) | Err(_) => (
+            Ok(None) => (
                 false,
-                fallback_ranking_note(mode).to_string(),
+                format!(
+                    "未检测到可用的论文检索模型或小妍主模型，{}",
+                    fallback_ranking_note(mode)
+                ),
                 fallback_overall_summary(mode, candidates.len(), result_limit),
                 heuristic.iter().take(result_limit).cloned().collect(),
             ),
+            Err(error) => {
+                eprintln!("小妍论文重排失败，使用启发式排序：{error}");
+                (
+                    false,
+                    format!("小妍模型重排未完成，{}", fallback_ranking_note(mode)),
+                    fallback_overall_summary(mode, candidates.len(), result_limit),
+                    heuristic.iter().take(result_limit).cloned().collect(),
+                )
+            }
         };
 
     // LLM 仅对前若干候选重排，返回不足目标篇数时用启发式结果按相关性补齐，尽量凑满 limit。
@@ -278,7 +344,10 @@ pub async fn paper_search(
         keywords,
         applied_filters: request,
         search_expression,
-        days: day_window,
+        search_queries: search_plan.queries,
+        query_plan_llm_used: search_plan.llm_used,
+        query_plan_note: search_plan.note,
+        cutoff_date,
         limit: result_limit,
         ranking_mode: mode.as_str().to_string(),
         candidate_count: candidates.len(),
@@ -310,7 +379,15 @@ pub async fn search_survey_candidates(
     let mut seen_candidate_ids = HashSet::new();
     let mut last_error = None;
     for term in &search_terms {
-        match fetch_semantic_scholar_candidates(settings, term, &[], 36_500, max_results).await {
+        match fetch_semantic_scholar_candidates_with_date_range(
+            settings,
+            term,
+            &[],
+            None,
+            max_results,
+        )
+        .await
+        {
             Ok(term_candidates) => {
                 for candidate in term_candidates {
                     let key = if candidate.id.trim().is_empty() {
@@ -412,6 +489,25 @@ pub(crate) async fn fetch_semantic_scholar_candidates(
     days: i64,
     max_results: usize,
 ) -> anyhow::Result<Vec<PaperCandidate>> {
+    let start_date = Local::now().date_naive() - ChronoDuration::days(days.clamp(1, 36_500));
+    let publication_date_range = format!("{}:", start_date.format("%Y-%m-%d"));
+    fetch_semantic_scholar_candidates_with_date_range(
+        settings,
+        query,
+        exclude_terms,
+        Some(&publication_date_range),
+        max_results,
+    )
+    .await
+}
+
+async fn fetch_semantic_scholar_candidates_with_date_range(
+    settings: &HashMap<String, String>,
+    query: &str,
+    exclude_terms: &[String],
+    publication_date_range: Option<&str>,
+    max_results: usize,
+) -> anyhow::Result<Vec<PaperCandidate>> {
     let client = reqwest::Client::new();
     let mut builder = client
         .get(SEMANTIC_SCHOLAR_API_URL)
@@ -425,6 +521,10 @@ pub(crate) async fn fetch_semantic_scholar_candidates(
                     .to_string(),
             ),
         ]);
+
+    if let Some(publication_date_range) = publication_date_range {
+        builder = builder.query(&[("publicationDateOrYear", publication_date_range.to_string())]);
+    }
 
     if let Some(api_key) = settings
         .get("semantic_scholar_api_key")
@@ -466,8 +566,6 @@ pub(crate) async fn fetch_semantic_scholar_candidates(
     let payload: SemanticScholarSearchResponse =
         response.json().await.context("解析联网检索结果失败")?;
 
-    let min_year = Utc::now().year() - ((days as f64 / 365.0).ceil() as i32) - 1;
-
     let mut result = Vec::new();
     for item in payload.data {
         let lower_text = format!(
@@ -483,12 +581,6 @@ pub(crate) async fn fetch_semantic_scholar_candidates(
             .any(|term| !term.is_empty() && lower_text.contains(&term.to_lowercase()))
         {
             continue;
-        }
-
-        if let Some(year) = item.year {
-            if year < min_year {
-                continue;
-            }
         }
 
         let authors = item
@@ -538,19 +630,10 @@ async fn rerank_with_xiaoyan(
     limit: usize,
     candidates: &[PaperCandidate],
 ) -> anyhow::Result<Option<(String, String, Vec<PaperRecommendation>)>> {
-    let client = match LlmClient::scout_client_from_settings(settings) {
-        Ok(client) => client,
+    let (client, model) = match LlmClient::literature_client_with_main_fallback(settings) {
+        Ok(resolved) => resolved,
         Err(_) => return Ok(None),
     };
-
-    let model = resolve_model(
-        settings,
-        &[
-            "multi_agent_literature_scout_model",
-            "survey_planner_model",
-            "copilot_simple_model",
-        ],
-    );
     let temperature =
         resolve_temperature(settings, "multi_agent_literature_scout_temperature", 0.2);
 
@@ -653,9 +736,18 @@ async fn rerank_with_xiaoyan(
 fn heuristic_rank_papers(
     candidates: &[PaperCandidate],
     request: &PaperSearchRequest,
+    search_queries: &[String],
     mode: RankingMode,
     limit: usize,
 ) -> Vec<PaperRecommendation> {
+    let query_tokens = search_queries
+        .iter()
+        .flat_map(|query| {
+            query.split(|character: char| !character.is_alphanumeric() && character != '-')
+        })
+        .map(|token| token.trim().to_lowercase())
+        .filter(|token| token.chars().count() >= 3)
+        .collect::<HashSet<_>>();
     let mut scored = candidates
         .iter()
         .map(|paper| {
@@ -683,6 +775,12 @@ fn heuristic_rank_papers(
             score += add_match_score(&request.authors, 10);
             score += add_match_score(&request.journal_ref_terms, 8);
             score += add_match_score(&request.categories, 4);
+            score += (query_tokens
+                .iter()
+                .filter(|token| text.contains(token.as_str()))
+                .count() as i32
+                * 2)
+            .min(18);
             score += (paper.citation_count / 200).clamp(0, 12);
 
             if mode == RankingMode::Quality {
@@ -755,7 +853,7 @@ fn score_survey_candidate(candidate: &PaperCandidate, query_terms: &[String]) ->
 fn describe_request(request: &PaperSearchRequest) -> String {
     let mut parts = Vec::new();
     if !request.topic.is_empty() {
-        parts.push(format!("主题：{}", request.topic));
+        parts.push(format!("自然语言需求：{}", request.topic));
     }
     if !request.all_terms.is_empty() {
         parts.push(format!("关键词：{}", request.all_terms.join(" / ")));
@@ -805,11 +903,8 @@ fn collect_keywords(request: &PaperSearchRequest) -> Vec<String> {
         .collect()
 }
 
-fn build_search_query(request: &PaperSearchRequest) -> String {
+fn collect_structured_search_terms(request: &PaperSearchRequest) -> Vec<String> {
     let mut terms = Vec::new();
-    if !request.topic.is_empty() {
-        terms.push(request.topic.clone());
-    }
     terms.extend(request.all_terms.clone());
     terms.extend(request.title_terms.clone());
     terms.extend(request.abstract_terms.clone());
@@ -825,8 +920,7 @@ fn build_search_query(request: &PaperSearchRequest) -> String {
             let key = value.trim().to_lowercase();
             !key.is_empty() && seen.insert(key)
         })
-        .collect::<Vec<_>>()
-        .join(" ")
+        .collect()
 }
 
 fn clean_whitespace(input: &str) -> String {
@@ -880,9 +974,124 @@ fn fallback_overall_summary(mode: RankingMode, candidates: usize, limit: usize) 
     }
 }
 
+// ── Search history persistence ─────────────────────────────────────────
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct PaperSearchSaveHistoryRequest {
+    pub draft_json: String,
+    pub result_json: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct PaperSearchHistoryEntry {
+    pub id: String,
+    pub draft_json: String,
+    pub result_json: String,
+    pub created_at: String,
+}
+
+#[tauri::command]
+pub async fn paper_search_save_history(
+    state: State<'_, AppState>,
+    request: PaperSearchSaveHistoryRequest,
+) -> Result<PaperSearchHistoryEntry, String> {
+    let trimmed_draft = request.draft_json.trim();
+    if trimmed_draft.is_empty() || trimmed_draft == "{}" {
+        return Err("检索条件为空，无法保存历史记录。".into());
+    }
+
+    let id = uuid::Uuid::new_v4().to_string();
+    let created_at = chrono::Utc::now().to_rfc3339();
+    let result_json = if request.result_json.trim().is_empty() {
+        "{}".into()
+    } else {
+        request.result_json
+    };
+
+    sqlx::query(
+        "INSERT INTO paper_search_history (id, draft_json, result_json, created_at)
+         VALUES (?, ?, ?, ?)",
+    )
+    .bind(&id)
+    .bind(trimmed_draft)
+    .bind(&result_json)
+    .bind(&created_at)
+    .execute(&state.db)
+    .await
+    .map_err(|e| format!("保存论文检索历史失败：{e}"))?;
+
+    Ok(PaperSearchHistoryEntry {
+        id,
+        draft_json: trimmed_draft.to_string(),
+        result_json,
+        created_at,
+    })
+}
+
+#[tauri::command]
+pub async fn paper_search_get_history(
+    state: State<'_, AppState>,
+    limit: Option<i32>,
+) -> Result<Vec<PaperSearchHistoryEntry>, String> {
+    let limit = limit.unwrap_or(20).clamp(1, 100);
+
+    let rows = sqlx::query(
+        "SELECT id, draft_json, result_json, created_at
+         FROM paper_search_history
+         ORDER BY created_at DESC
+         LIMIT ?",
+    )
+    .bind(limit)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| format!("读取论文检索历史失败：{e}"))?;
+
+    let mut items = Vec::with_capacity(rows.len());
+    for row in rows {
+        items.push(PaperSearchHistoryEntry {
+            id: row.get("id"),
+            draft_json: row.get("draft_json"),
+            result_json: row.get("result_json"),
+            created_at: row.get("created_at"),
+        });
+    }
+
+    Ok(items)
+}
+
+#[tauri::command]
+pub async fn paper_search_delete_history(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<bool, String> {
+    let result = sqlx::query("DELETE FROM paper_search_history WHERE id = ?")
+        .bind(&id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| format!("删除论文检索历史失败：{e}"))?;
+
+    Ok(result.rows_affected() > 0)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::collect_survey_search_terms;
+    use super::{collect_survey_search_terms, normalize_cutoff_date};
+    use chrono::NaiveDate;
+
+    #[test]
+    fn cutoff_date_is_an_inclusive_upper_bound() {
+        let today = NaiveDate::from_ymd_opt(2026, 7, 22).unwrap();
+
+        assert_eq!(
+            normalize_cutoff_date(Some("2020-05-18"), today).unwrap(),
+            "2020-05-18"
+        );
+        assert_eq!(normalize_cutoff_date(None, today).unwrap(), "2026-07-22");
+        assert!(normalize_cutoff_date(Some("2026-07-23"), today).is_err());
+        assert!(normalize_cutoff_date(Some("2026-02-30"), today).is_err());
+    }
 
     #[test]
     fn collect_survey_search_terms_deduplicates_and_limits() {

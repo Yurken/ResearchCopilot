@@ -16,6 +16,7 @@ import { useCodeAttachments } from "./useCodeAttachments";
 import { useCodeContextPack } from "./useCodeContextPack";
 import { useCodeModelOptions } from "./useCodeModelOptions";
 import type { CodeAgentMode, OpenFile } from "./shared";
+import { buildCodePromptContent } from "./codeMessageContent";
 
 function generateMessageId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -36,6 +37,7 @@ interface DoneEvent {
   message_id: string;
   full_content: string;
   duration_ms: number;
+  model?: string | null;
 }
 
 interface ErrorEvent {
@@ -157,7 +159,7 @@ export function useCodeWorkspace(experimentId: string, options?: UseCodeWorkspac
 
       const unlistenDone = await listen<DoneEvent>("code:done", (event) => {
         if (!mounted || event.payload.session_id !== selectedIdRef.current) return;
-        const { session_id, message_id, full_content, duration_ms } = event.payload;
+        const { session_id, message_id, full_content, duration_ms, model } = event.payload;
 
         const assistantMsg: CodeMessage = {
           id: message_id,
@@ -167,7 +169,7 @@ export function useCodeWorkspace(experimentId: string, options?: UseCodeWorkspac
           tool_results: undefined,
           tool_call_id: null,
           tool_id: null,
-          model: null,
+          model: model ?? null,
           duration_ms,
           created_at: new Date().toISOString(),
         };
@@ -177,6 +179,7 @@ export function useCodeWorkspace(experimentId: string, options?: UseCodeWorkspac
             s.id === session_id
               ? {
                   ...s,
+                  model: model ?? s.model,
                   messages: [...s.messages, assistantMsg],
                   updated_at: new Date().toISOString(),
                 }
@@ -500,20 +503,11 @@ export function useCodeWorkspace(experimentId: string, options?: UseCodeWorkspac
       }
     }
 
-    let content = options?.skillPrompt
-      ? `${options.skillPrompt}\n\n---\n\n${rawContent}`
-      : rawContent;
-
-    // 注入附件文件内容
-    if (!options?.skipAttachments && attachmentsController.attachments.length > 0) {
-      const fileContext = attachmentsController.attachments
-        .map((a, i) => {
-          const trunc = a.truncated ? "\n[内容已截断]" : "";
-          return `[文件 ${i + 1}] ${a.name}\n路径：${a.path}\n\`\`\`\n${a.content}${trunc}\n\`\`\``;
-        })
-        .join("\n\n---\n\n");
-      content = `${content}\n\n<file-context>\n以下是用户附加的文件内容，请结合这些内容回答问题：\n\n${fileContext}\n</file-context>`;
-    }
+    const promptContent = buildCodePromptContent({
+      displayContent: rawContent,
+      skillPrompt: options?.skillPrompt,
+      attachments: options?.skipAttachments ? [] : attachmentsController.attachments,
+    });
 
     setSending(true);
     setTaskStartedAt(Date.now());
@@ -540,7 +534,8 @@ export function useCodeWorkspace(experimentId: string, options?: UseCodeWorkspac
     try {
       await codeApi.sendMessage(
         targetId,
-        content,
+        rawContent,
+        promptContent,
         workingDir ?? undefined,
         openFile?.name ?? undefined,
         agentMode,

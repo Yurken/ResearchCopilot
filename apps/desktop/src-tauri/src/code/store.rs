@@ -167,10 +167,15 @@ pub async fn persist_message(
     let json = serde_json::to_string(&messages)?;
     let ts = now();
 
-    // assistant 消息记录会话最近 tool/model，便于重开会话时恢复选择。
-    if msg.role == "assistant" && msg.tool_id.is_some() {
+    // assistant 消息记录最近模型；tool_id 仅为兼容旧数据，存在时一并更新。
+    if msg.role == "assistant" && (msg.tool_id.is_some() || msg.model.is_some()) {
         sqlx::query(
-            "UPDATE experiment_code_sessions SET messages_json = ?, tool_id = ?, model = ?, updated_at = ? WHERE id = ?",
+            "UPDATE experiment_code_sessions
+             SET messages_json = ?,
+                 tool_id = COALESCE(?, tool_id),
+                 model = COALESCE(?, model),
+                 updated_at = ?
+             WHERE id = ?",
         )
         .bind(&json)
         .bind(&msg.tool_id)
@@ -253,4 +258,71 @@ pub async fn update_session_title(
         .execute(db)
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    #[tokio::test]
+    async fn persists_only_display_content_and_tracks_assistant_model(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await?;
+        sqlx::query("CREATE TABLE submissions (id TEXT PRIMARY KEY)")
+            .execute(&pool)
+            .await?;
+        crate::db::ensure_experiment_tables(&pool).await?;
+        sqlx::query(
+            "INSERT INTO experiment_records
+             (id, title, config, result, notes, created_at, updated_at)
+             VALUES ('experiment-1', 'test', '{}', '', '', '2026-07-22', '2026-07-22')",
+        )
+        .execute(&pool)
+        .await?;
+        let session = create_session(&pool, "experiment-1", "新会话", Some("/project")).await?;
+
+        persist_message(
+            &pool,
+            &session.id,
+            &CodeMessage {
+                id: "user-1".into(),
+                role: "user".into(),
+                content: "用户可见内容".into(),
+                tool_calls: None,
+                tool_results: None,
+                tool_call_id: None,
+                tool_id: None,
+                model: None,
+                duration_ms: None,
+                created_at: now(),
+            },
+        )
+        .await?;
+        persist_message(
+            &pool,
+            &session.id,
+            &CodeMessage {
+                id: "assistant-1".into(),
+                role: "assistant".into(),
+                content: "完成".into(),
+                tool_calls: None,
+                tool_results: None,
+                tool_call_id: None,
+                tool_id: None,
+                model: Some("code-model".into()),
+                duration_ms: Some(20),
+                created_at: now(),
+            },
+        )
+        .await?;
+
+        let stored = get_session(&pool, &session.id).await?;
+        assert_eq!(stored.messages[0].content, "用户可见内容");
+        assert_eq!(stored.model.as_deref(), Some("code-model"));
+        Ok(())
+    }
 }

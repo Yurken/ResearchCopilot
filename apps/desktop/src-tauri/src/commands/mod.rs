@@ -32,6 +32,7 @@ pub mod paper_figure_pages;
 pub mod paper_figures;
 pub mod paper_notes;
 pub mod paper_search;
+mod paper_search_plan;
 pub mod paper_text;
 pub mod papers;
 pub mod research_context;

@@ -1,4 +1,27 @@
-import type { ExperimentSnapshot } from "@research-copilot/types";
+import type { ExperimentRecord, ExperimentSnapshot } from "@research-copilot/types";
+
+export function mapExperimentRecord(row: unknown): ExperimentRecord {
+  const record = row as Record<string, unknown>;
+  let config: Record<string, unknown> = {};
+  try {
+    config = typeof record.config === "string"
+      ? JSON.parse(record.config)
+      : (record.config as Record<string, unknown>) ?? {};
+  } catch (error) {
+    console.warn("Failed to parse experiment config:", error);
+  }
+  return {
+    id: String(record.id ?? ""),
+    title: String(record.title ?? ""),
+    config,
+    result: String(record.result ?? ""),
+    notes: String(record.notes ?? ""),
+    linkedSubmissionId: record.linkedSubmissionId ? String(record.linkedSubmissionId) : null,
+    defaultWorkingDir: record.defaultWorkingDir ? String(record.defaultWorkingDir) : null,
+    createdAt: String(record.createdAt ?? record.created_at ?? ""),
+    updatedAt: String(record.updatedAt ?? record.updated_at ?? ""),
+  };
+}
 
 // ── Snapshot diff types ────────────────────────────────────────────
 

@@ -17,6 +17,7 @@ import {
   Textarea,
 } from "@research-copilot/ui";
 import ExternalLink from "../../components/ExternalLink";
+import { PatentPrivacyControls } from "./PatentPrivacyControls";
 import { usePatentSearch } from "./usePatentSearch";
 import type { PatentRiskLevel } from "./shared";
 
@@ -69,7 +70,7 @@ export default function PatentWorkspace() {
             <FileSearch className="h-5 w-5" />
           </span>
           <div className="min-w-0">
-            <h2 className="text-base font-semibold text-ink-primary">中国专利检索与专利性预评估</h2>
+            <h2 className="text-base font-semibold text-ink-primary">中国专利线索检索与初步风险提示</h2>
             <p className="mt-1 max-w-3xl text-xs leading-5 text-ink-tertiary">
               描述技术方案，先定位可能的现有技术，再围绕新颖性、创造性与公开风险做初筛。
             </p>
@@ -114,16 +115,24 @@ export default function PatentWorkspace() {
           </p>
         </Card>
 
+        <PatentPrivacyControls
+          plan={patent.plan}
+          searchConsent={patent.searchConsent}
+          aiConsent={patent.aiConsent}
+          onSearchConsentChange={patent.setSearchConsent}
+          onAiConsentChange={patent.setAiConsent}
+        />
+
         <ErrorNotice message={patent.error} />
 
         <div className="flex flex-wrap items-center gap-3">
           <Button
             onClick={() => void patent.search()}
             loading={patent.loading}
-            disabled={!patent.description.trim()}
+            disabled={!patent.description.trim() || !patent.searchConsent}
           >
             <Search className="h-4 w-4" />
-            检索中国专利
+            检索公开网络线索
           </Button>
           <span className="text-xs text-ink-tertiary">优先检索中国公开专利，并按技术特征重叠度排序</span>
         </div>
@@ -162,6 +171,9 @@ export default function PatentWorkspace() {
                           </ExternalLink>
                           <div className="mt-2 flex flex-wrap items-center gap-2">
                             {result.publicationNumber ? <Badge>{result.publicationNumber}</Badge> : null}
+                            <Badge variant={result.sourceVerified ? "info" : "default"}>
+                              {result.sourceVerified ? "来源可核验" : "网页线索"}
+                            </Badge>
                             <ExternalLink href={result.url} className="inline-flex items-center gap-1 text-xs font-medium text-apple-blue">
                               查看来源 <ExternalLinkIcon className="h-3 w-3" />
                             </ExternalLink>
@@ -208,6 +220,7 @@ export default function PatentWorkspace() {
               <RiskSummary label="披露" level={patent.report.disclosureRisk} />
             </div>
             <p className="mt-4 text-sm leading-6 text-ink-secondary">{patent.report.summary}</p>
+            <p className="mt-2 text-xs leading-5 text-ink-tertiary">{patent.report.evidenceSummary}</p>
 
             <CardSection>
               <p className="text-xs font-semibold text-ink-secondary">可重点论证</p>
@@ -227,7 +240,7 @@ export default function PatentWorkspace() {
               className="mt-4 w-full"
               onClick={() => void patent.generateAiReport()}
               loading={patent.aiLoading}
-              disabled={patent.results.length === 0}
+              disabled={patent.results.length === 0 || !patent.aiConsent}
             >
               <BrainCircuit className="h-4 w-4" />
               AI 深度评估

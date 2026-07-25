@@ -19,8 +19,6 @@ import { useGithubProjectSearch } from "../features/tools/useGithubProjectSearch
 import { GithubProjectSearchPanel } from "../features/tools/GithubProjectSearchPanel";
 import { useTranslationTool } from "../features/tools/useTranslationTool";
 import { TranslationPanel } from "../features/tools/TranslationPanel";
-import { WebSupplementPanel } from "../features/tools/WebSupplementPanel";
-import { useWebSupplement } from "../features/tools/useWebSupplement";
 import PatentWorkspace from "../features/patent-tool/PatentWorkspace";
 import DocumentCheckerWorkspace from "../features/document-checker/DocumentCheckerWorkspace";
 import { useModuleVisibility } from "../features/module-visibility/useModuleVisibility";
@@ -54,19 +52,8 @@ export default function Tools() {
     submit: handleSourceLookup,
   } = useSourceLookup();
   const paperDiscovery = usePaperDiscoverySearch();
-  const webSupplement = useWebSupplement();
   const arxivFieldSearch = useArxivFieldSearch();
   const githubProjectSearch = useGithubProjectSearch();
-
-  const webSupplementSeed = [
-    paperDiscovery.panelProps.allTerms,
-    paperDiscovery.panelProps.titleTerms,
-    paperDiscovery.panelProps.abstractTerms,
-    paperDiscovery.panelProps.topic,
-  ]
-    .map((value) => value.trim())
-    .filter(Boolean)
-    .join(", ");
   const friendLinks = useFriendLinks();
   const [activeTab, setActiveTab] = usePersistentStringState<ToolTabKey>(
     "rc:tools:active-tab",
@@ -161,21 +148,12 @@ export default function Tools() {
       <ArxivSearchResults
         {...paperDiscovery.resultProps}
         expressionLabel="本次查询表达式"
-        emptyMatchHint="建议增加最近天数，或放宽标题词、摘要词和领域标签条件。"
-        emptySearchHint="检查检索字段和时间窗口后重试。"
+        emptyMatchHint="建议精简自然语言需求、补充关键词，或放宽标题词、摘要词和领域标签条件。"
+        emptySearchHint="检查检索字段和截止日期后重试。"
         detailActionLabel="详情"
         detailActionTitle="打开论文详情页"
         pdfActionLabel="PDF"
         pdfActionTitle="打开论文 PDF"
-      />
-
-      <WebSupplementPanel
-        seedQuery={webSupplementSeed}
-        outcome={webSupplement.outcome}
-        loading={webSupplement.loading}
-        error={webSupplement.error}
-        searched={webSupplement.searched}
-        onRun={() => webSupplement.run(webSupplementSeed)}
       />
 
       <ArxivFieldSearchPanel {...arxivFieldSearch.panelProps} />

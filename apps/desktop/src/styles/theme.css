@@ -55,6 +55,7 @@
   --rc-dropdown-menu-border: rgba(255, 255, 255, 0.06);
   --rc-dropdown-menu-shadow: var(--rc-card-shadow);
   --rc-button-primary-bg: linear-gradient(145deg, #1A8AFF, #0062CC);
+  --rc-button-primary-text: #F5F7FA;
   --rc-button-primary-bg-hover: linear-gradient(145deg, #2992FF, #0A7AFF);
   --rc-button-primary-border: transparent;
   --rc-button-primary-shadow: 5px 5px 12px rgba(0, 98, 204, 0.45), -3px -3px 8px rgba(58, 155, 255, 0.30);
@@ -173,6 +174,7 @@ html[data-theme="light"] {
   --rc-dropdown-menu-border: rgba(200, 205, 211, 0.28);
   --rc-dropdown-menu-shadow: var(--rc-card-shadow);
   --rc-button-primary-bg: linear-gradient(145deg, #1A8AFF, #0062CC);
+  --rc-button-primary-text: #F8FAFC;
   --rc-button-primary-bg-hover: linear-gradient(145deg, #2992FF, #0A7AFF);
   --rc-button-primary-border: transparent;
   --rc-button-primary-shadow: 5px 5px 12px rgba(0, 98, 204, 0.45), -3px -3px 8px rgba(58, 155, 255, 0.30);
@@ -287,6 +289,7 @@ html[data-style="modern-minimal"] {
   --rc-dropdown-menu-border: var(--rc-border);
   --rc-dropdown-menu-shadow: var(--rc-raised-shadow);
   --rc-button-primary-bg: #ffffff;
+  --rc-button-primary-text: #0d1014;
   --rc-button-primary-bg-hover: #e0e0e0;
   --rc-button-primary-border: transparent;
   --rc-button-primary-shadow: none;
@@ -400,6 +403,7 @@ html[data-style="modern-minimal"][data-theme="light"] {
   --rc-dropdown-menu-border: var(--rc-border);
   --rc-dropdown-menu-shadow: var(--rc-raised-shadow);
   --rc-button-primary-bg: #000000;
+  --rc-button-primary-text: #ffffff;
   --rc-button-primary-bg-hover: #333333;
   --rc-button-primary-border: transparent;
   --rc-button-primary-shadow: none;
@@ -515,6 +519,7 @@ html[data-style="liquid-glass"] {
   --rc-dropdown-menu-border: rgba(255, 255, 255, 0.08);
   --rc-dropdown-menu-shadow: var(--rc-raised-shadow);
   --rc-button-primary-bg: #0A84FF;
+  --rc-button-primary-text: #F5F7FA;
   --rc-button-primary-bg-hover: #148CFF;
   --rc-button-primary-border: transparent;
   --rc-button-primary-shadow: 0 2px 8px rgba(10, 132, 255, 0.3);
@@ -631,6 +636,7 @@ html[data-style="liquid-glass"][data-theme="light"] {
   --rc-dropdown-menu-border: rgba(0, 0, 0, 0.05);
   --rc-dropdown-menu-shadow: var(--rc-raised-shadow);
   --rc-button-primary-bg: #007AFF;
+  --rc-button-primary-text: #F8FAFC;
   --rc-button-primary-bg-hover: #0066D6;
   --rc-button-primary-border: transparent;
   --rc-button-primary-shadow: 0 2px 8px rgba(0, 122, 255, 0.2);

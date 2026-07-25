@@ -130,6 +130,61 @@ pub async fn experiment_create(
     .await
 }
 
+async fn update_experiment_core(
+    db: &sqlx::SqlitePool,
+    id: &str,
+    title: Option<String>,
+    config: Option<serde_json::Value>,
+    result: Option<String>,
+    notes: Option<String>,
+    linked_submission_id: Option<String>,
+    default_working_dir: Option<String>,
+) -> Result<(), String> {
+    let config_json = config
+        .map(|value| serde_json::to_string(&value).map_err(|error| error.to_string()))
+        .transpose()?;
+    let ts = now();
+    let update = sqlx::query(
+        "UPDATE experiment_records
+         SET title = COALESCE(?, title),
+             config = COALESCE(?, config),
+             result = COALESCE(?, result),
+             notes = COALESCE(?, notes),
+             linked_submission_id = CASE
+                 WHEN ? IS NULL THEN linked_submission_id
+                 WHEN TRIM(?) = '' THEN NULL
+                 ELSE ?
+             END,
+             default_working_dir = CASE
+                 WHEN ? IS NULL THEN default_working_dir
+                 WHEN TRIM(?) = '' THEN NULL
+                 ELSE ?
+             END,
+             updated_at = ?
+         WHERE id = ?",
+    )
+    .bind(title.as_deref())
+    .bind(config_json.as_deref())
+    .bind(result.as_deref())
+    .bind(notes.as_deref())
+    .bind(linked_submission_id.as_deref())
+    .bind(linked_submission_id.as_deref())
+    .bind(linked_submission_id.as_deref())
+    .bind(default_working_dir.as_deref())
+    .bind(default_working_dir.as_deref())
+    .bind(default_working_dir.as_deref())
+    .bind(&ts)
+    .bind(id)
+    .execute(db)
+    .await
+    .map_err(|error| error.to_string())?;
+
+    if update.rows_affected() == 0 {
+        return Err("实验记录不存在".into());
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn experiment_update(
     state: State<'_, AppState>,
@@ -139,58 +194,19 @@ pub async fn experiment_update(
     result: Option<String>,
     notes: Option<String>,
     linked_submission_id: Option<String>,
+    default_working_dir: Option<String>,
 ) -> Result<(), String> {
-    let ts = now();
-    if let Some(v) = &title {
-        sqlx::query("UPDATE experiment_records SET title = ?, updated_at = ? WHERE id = ?")
-            .bind(v)
-            .bind(&ts)
-            .bind(&id)
-            .execute(&state.db)
-            .await
-            .map_err(|e| e.to_string())?;
-    }
-    if let Some(v) = &config {
-        let json_str = serde_json::to_string(v).unwrap_or_else(|_| "{}".into());
-        sqlx::query("UPDATE experiment_records SET config = ?, updated_at = ? WHERE id = ?")
-            .bind(&json_str)
-            .bind(&ts)
-            .bind(&id)
-            .execute(&state.db)
-            .await
-            .map_err(|e| e.to_string())?;
-    }
-    if let Some(v) = &result {
-        sqlx::query("UPDATE experiment_records SET result = ?, updated_at = ? WHERE id = ?")
-            .bind(v)
-            .bind(&ts)
-            .bind(&id)
-            .execute(&state.db)
-            .await
-            .map_err(|e| e.to_string())?;
-    }
-    if let Some(v) = &notes {
-        sqlx::query("UPDATE experiment_records SET notes = ?, updated_at = ? WHERE id = ?")
-            .bind(v)
-            .bind(&ts)
-            .bind(&id)
-            .execute(&state.db)
-            .await
-            .map_err(|e| e.to_string())?;
-    }
-    if let Some(v) = &linked_submission_id {
-        let val: Option<&str> = if v.is_empty() { None } else { Some(v) };
-        sqlx::query(
-            "UPDATE experiment_records SET linked_submission_id = ?, updated_at = ? WHERE id = ?",
-        )
-        .bind(val)
-        .bind(&ts)
-        .bind(&id)
-        .execute(&state.db)
-        .await
-        .map_err(|e| e.to_string())?;
-    }
-    Ok(())
+    update_experiment_core(
+        &state.db,
+        &id,
+        title,
+        config,
+        result,
+        notes,
+        linked_submission_id,
+        default_working_dir,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -716,6 +732,81 @@ mod tests {
         assert_eq!(renamed.get::<String, _>("config_snapshot"), "{\"lr\":1}");
         assert_eq!(renamed.get::<String, _>("result_snapshot"), "old result");
         assert_eq!(renamed.get::<String, _>("notes_snapshot"), "old notes");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn update_experiment_is_atomic_and_persists_working_directory(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await?;
+        sqlx::query("CREATE TABLE submissions (id TEXT PRIMARY KEY)")
+            .execute(&pool)
+            .await?;
+        crate::db::ensure_experiment_tables(&pool).await?;
+        sqlx::query(
+            "INSERT INTO experiment_records
+             (id, title, config, result, notes, default_working_dir, created_at, updated_at)
+             VALUES ('experiment-1', 'before', '{}', '', '', '/old', '2026-07-22', '2026-07-22')",
+        )
+        .execute(&pool)
+        .await?;
+
+        update_experiment_core(
+            &pool,
+            "experiment-1",
+            Some("after".into()),
+            Some(serde_json::json!({ "seed": 42 })),
+            None,
+            None,
+            None,
+            Some("/project/reproduction".into()),
+        )
+        .await?;
+        let row = sqlx::query(
+            "SELECT title, config, default_working_dir FROM experiment_records WHERE id = 'experiment-1'",
+        )
+        .fetch_one(&pool)
+        .await?;
+        assert_eq!(row.get::<String, _>("title"), "after");
+        assert_eq!(row.get::<String, _>("config"), "{\"seed\":42}");
+        assert_eq!(
+            row.get::<String, _>("default_working_dir"),
+            "/project/reproduction"
+        );
+
+        update_experiment_core(
+            &pool,
+            "experiment-1",
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(String::new()),
+        )
+        .await?;
+        let cleared: Option<String> = sqlx::query_scalar(
+            "SELECT default_working_dir FROM experiment_records WHERE id = 'experiment-1'",
+        )
+        .fetch_one(&pool)
+        .await?;
+        assert_eq!(cleared, None);
+
+        let missing = update_experiment_core(
+            &pool,
+            "missing",
+            Some("no-op".into()),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(missing.expect_err("missing experiment"), "实验记录不存在");
         Ok(())
     }
 }

@@ -16,6 +16,13 @@ import { apiClient, formatErrorMessage } from "../lib/client";
 import { openLink } from "../lib/links";
 import type { AgentRun, ChatSession, Skill } from "@research-copilot/types";
 import { interestFolderName } from "../lib/interestUtils";
+import CopilotContextBar from "../features/copilot/CopilotContextBar";
+import {
+  consumeCopilotPaperHandoff,
+  removeCopilotHandoffDetail,
+  type CopilotHandoffDetail,
+} from "../features/copilot/copilotHandoff";
+import { useCopilotPaperContext } from "../features/copilot/useCopilotPaperContext";
 
 export default function Copilot({ hideFolders = false }: { hideFolders?: boolean }) {
   const sessionListStorageKey = hideFolders
@@ -29,6 +36,7 @@ export default function Copilot({ hideFolders = false }: { hideFolders?: boolean
   const sessionListCollapsed = sessionListMode === "collapsed";
 
   const sessions = useCopilotSessions();
+  const [paperHandoff, setPaperHandoff] = useState(() => consumeCopilotPaperHandoff());
   const { chatMode, setChatMode } = useCopilotChatMode();
 
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -57,9 +65,14 @@ export default function Copilot({ hideFolders = false }: { hideFolders?: boolean
   // 拖拽文件到对话列即添加为附件（图片/文档由附件管线区分处理）。
   const chatDropZone = useCopilotDropZone(pickFromDrop);
 
+  const activeContextType = sessions.currentSession?.context_type || paperHandoff?.contextType;
+  const activeContextId = sessions.currentSession?.context_id || paperHandoff?.contextId;
+  const persistedPaperTitle = useCopilotPaperContext(activeContextType, activeContextId);
   const chat = useCopilotChat({
     currentSession: sessions.currentSession,
     selectedInterestId: sessions.selectedInterestId,
+    contextType: activeContextType,
+    contextId: activeContextId,
     chatMode,
     skills,
     selectedSkillId,
@@ -93,7 +106,18 @@ export default function Copilot({ hideFolders = false }: { hideFolders?: boolean
     loadSessionRequestRef.current += 1;
     sessions.handleNewChat();
     chat.resetChat();
+    setPaperHandoff(null);
   }, [sessions, chat]);
+
+  const appliedPaperHandoffRef = useRef(false);
+  useEffect(() => {
+    if (!paperHandoff || appliedPaperHandoffRef.current) return;
+    appliedPaperHandoffRef.current = true;
+    sessions.handleNewChat();
+    chat.resetChat();
+    chat.setInput(paperHandoff.prompt);
+    restoredLastSessionRef.current = true;
+  }, [chat, paperHandoff, sessions]);
 
   const handleLoadSession = useCallback(async (session: ChatSession) => {
     const requestId = loadSessionRequestRef.current + 1;
@@ -114,6 +138,7 @@ export default function Copilot({ hideFolders = false }: { hideFolders?: boolean
 
   useEffect(() => {
     if (restoredLastSessionRef.current) return;
+    if (paperHandoff) return;
     if (!sessions.sessionsLoaded || sessions.currentSession) return;
     restoredLastSessionRef.current = true;
     const lastSessionId = readPersistentValue(COPILOT_LAST_SESSION_KEY);
@@ -124,7 +149,20 @@ export default function Copilot({ hideFolders = false }: { hideFolders?: boolean
       return;
     }
     void handleLoadSession(lastSession);
-  }, [handleLoadSession, sessions.currentSession, sessions.sessions, sessions.sessionsLoaded]);
+  }, [handleLoadSession, paperHandoff, sessions.currentSession, sessions.sessions, sessions.sessionsLoaded]);
+
+  const paperContextTitle = activeContextType === "paper"
+    ? paperHandoff?.contextLabel || persistedPaperTitle || "当前论文"
+    : "";
+
+  const handleRemoveHandoffDetail = useCallback((detail: CopilotHandoffDetail) => {
+    setPaperHandoff((current) => {
+      if (!current) return current;
+      const next = removeCopilotHandoffDetail(current, detail);
+      chat.setInput((input) => input === current.prompt ? next.prompt : input);
+      return next;
+    });
+  }, [chat]);
 
   // Skills
   useEffect(() => {
@@ -267,6 +305,15 @@ export default function Copilot({ hideFolders = false }: { hideFolders?: boolean
               </button>
             )}
 
+            {activeContextType === "paper" && activeContextId ? (
+              <CopilotContextBar
+                paperTitle={paperContextTitle}
+                handoff={paperHandoff}
+                onRemovePage={() => handleRemoveHandoffDetail("page")}
+                onRemoveSelection={() => handleRemoveHandoffDetail("selection")}
+              />
+            ) : null}
+
             <CopilotChatArea
               messages={chat.messages}
               chatMode={chatMode}
@@ -280,6 +327,7 @@ export default function Copilot({ hideFolders = false }: { hideFolders?: boolean
               editingMessageId={editingMessageId}
               editText={editText}
               copiedId={copiedId}
+              sessionId={sessions.currentSession?.id}
               onClearError={() => { sessions.setLoadError(""); chat.setLoadError(""); }}
               onCopy={handleCopy}
               onRetry={chat.retry}

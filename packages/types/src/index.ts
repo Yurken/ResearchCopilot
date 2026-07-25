@@ -345,7 +345,11 @@ export interface ArxivSearchResponse {
   keywords: string[];
   applied_filters: ArxivSearchRequest;
   search_expression: string;
-  days: number;
+  search_queries?: string[];
+  query_plan_llm_used?: boolean;
+  query_plan_note?: string;
+  days?: number;
+  cutoff_date?: string;
   limit: number;
   ranking_mode: ArxivRankingMode;
   candidate_count: number;

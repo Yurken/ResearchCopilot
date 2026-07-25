@@ -112,6 +112,7 @@ struct DoneEvent {
     message_id: String,
     full_content: String,
     duration_ms: u64,
+    model: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -146,7 +147,8 @@ pub async fn send_message_stream(
     db: SqlitePool,
     settings: HashMap<String, String>,
     session_id: String,
-    content: String,
+    display_content: String,
+    prompt_content: String,
     working_dir: Option<String>,
     current_file: Option<String>,
     mode: Option<String>,
@@ -169,7 +171,7 @@ pub async fn send_message_stream(
     let user_msg = CodeMessage {
         id: user_message_id.unwrap_or_else(|| Uuid::new_v4().to_string()),
         role: "user".to_string(),
-        content: content.clone(),
+        content: display_content.clone(),
         tool_calls: None,
         tool_results: None,
         tool_call_id: None,
@@ -230,7 +232,11 @@ pub async fn send_message_stream(
     const MAX_CONTEXT_MESSAGES: usize = 20;
     let history_start = session.messages.len().saturating_sub(MAX_CONTEXT_MESSAGES);
     for msg in &session.messages[history_start..] {
-        push_code_message_as_llm(&mut messages, msg);
+        if msg.id == user_msg.id {
+            messages.push(LlmMessage::user(prompt_content.clone()));
+        } else {
+            push_code_message_as_llm(&mut messages, msg);
+        }
     }
 
     // 4. Agent 工具循环：模型请求工具 -> 后端执行 -> 工具结果回填 -> 继续生成。
@@ -306,6 +312,7 @@ pub async fn send_message_stream(
                         message_id: assistant_msg.id.clone(),
                         full_content: full,
                         duration_ms: assistant_msg.duration_ms.unwrap_or_default(),
+                        model: assistant_msg.model.clone(),
                     },
                 );
 

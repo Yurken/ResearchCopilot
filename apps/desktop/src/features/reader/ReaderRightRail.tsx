@@ -1,12 +1,13 @@
-import { Languages, MessageCircleQuestion } from "lucide-react";
+import { Languages, MessageCircleQuestion, Sparkles } from "lucide-react";
 
-export type ReaderRightPanel = "translation" | "qa" | null;
+export type ReaderRightPanel = "translation" | "qa" | "research" | null;
 
 export default function ReaderRightRail({ active, onSelect }: { active: ReaderRightPanel; onSelect: (panel: Exclude<ReaderRightPanel, null>) => void }) {
   return (
     <nav className="flex w-10 shrink-0 flex-col items-center gap-1 border-l py-2" style={{ background: "var(--rc-card-bg)", borderColor: "var(--rc-border)" }}>
       <RailButton label="翻译" active={active === "translation"} onClick={() => onSelect("translation")} icon={Languages} />
       <RailButton label="问答" active={active === "qa"} onClick={() => onSelect("qa")} icon={MessageCircleQuestion} />
+      <RailButton label="研究" active={active === "research"} onClick={() => onSelect("research")} icon={Sparkles} />
     </nav>
   );
 }

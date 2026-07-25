@@ -13,31 +13,11 @@ import type { ExperimentRecord } from "@research-copilot/types";
 import { experimentApi, submissionApi, formatErrorMessage } from "../../lib/client";
 import { useDomainEventRefresh } from "../../hooks/useDomainEventRefresh";
 import { ExperimentAttachmentPanel } from "./ExperimentAttachmentPanel";
+import { mapExperimentRecord } from "./shared";
 
 interface SubmissionItem {
   id: string;
   title: string;
-}
-
-function rowToExperiment(row: unknown): ExperimentRecord {
-  const r = row as Record<string, unknown>;
-  let config: Record<string, unknown> = {};
-  try {
-    config = typeof r.config === "string"
-      ? JSON.parse(r.config)
-      : (r.config as Record<string, unknown>) ?? {};
-  } catch (err) { console.warn("Failed to parse experiment config:", err); }
-  return {
-    id: String(r.id ?? ""),
-    title: String(r.title ?? ""),
-    config,
-    result: String(r.result ?? ""),
-    notes: String(r.notes ?? ""),
-    linkedSubmissionId: r.linkedSubmissionId ? String(r.linkedSubmissionId) : null,
-    defaultWorkingDir: r.defaultWorkingDir ? String(r.defaultWorkingDir) : null,
-    createdAt: String(r.createdAt ?? r.created_at ?? ""),
-    updatedAt: String(r.updatedAt ?? r.updated_at ?? ""),
-  };
 }
 
 interface ExperimentRecordPanelProps {
@@ -78,6 +58,11 @@ export function ExperimentRecordPanel({
     onActiveExperimentChange?.(experiment);
   }
 
+  const showToast = useCallback((message: string) => {
+    setToast(message);
+    window.setTimeout(() => setToast(""), 2500);
+  }, []);
+
   const loadExperiments = useCallback(async () => {
     try {
       const [expResult, subResult] = await Promise.all([
@@ -85,13 +70,15 @@ export function ExperimentRecordPanel({
         submissionApi.list(),
       ]);
       const expRaw = (expResult as { experiments: unknown[] }).experiments ?? [];
-      setExperiments(expRaw.map(rowToExperiment));
+      setExperiments(expRaw.map(mapExperimentRecord));
       const subRaw = ((subResult as { submissions?: unknown[] }).submissions ?? []) as Record<string, unknown>[];
       setSubmissions(subRaw.map((s) => ({ id: String(s.id ?? ""), title: String(s.title ?? "") })));
-    } catch {
-      // keep existing data on refresh failure
+    } catch (error) {
+      const message = `加载实验记录失败：${formatErrorMessage(error)}`;
+      if (onError) onError(message);
+      else showToast(message);
     }
-  }, []);
+  }, [onError, showToast]);
 
   useEffect(() => {
     setLoading(true);
@@ -112,11 +99,6 @@ export function ExperimentRecordPanel({
     setEditLinked(selected.linkedSubmissionId ?? "");
     setConfigError("");
   }, [selected]);
-
-  function showToast(msg: string) {
-    setToast(msg);
-    setTimeout(() => setToast(""), 2500);
-  }
 
   async function handleCreate() {
     setCreating(true);

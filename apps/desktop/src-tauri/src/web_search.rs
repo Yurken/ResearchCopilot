@@ -1,4 +1,5 @@
 use anyhow::Result;
+use chrono::{Duration as ChronoDuration, NaiveDate};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -86,13 +87,15 @@ pub struct WebSearchOutcome {
 pub async fn web_search_query(
     state: State<'_, AppState>,
     query: String,
+    cutoff_date: Option<String>,
 ) -> Result<WebSearchOutcome, String> {
     let trimmed = query.trim();
     if trimmed.is_empty() {
         return Err("搜索词不能为空".into());
     }
+    let cutoff_date = normalize_cutoff_date(cutoff_date.as_deref())?;
     let settings = state.settings.read().await.clone();
-    web_search_structured(trimmed, &settings)
+    web_search_structured_with_cutoff(trimmed, &settings, cutoff_date.as_deref())
         .await
         .map_err(|err| err.to_string())
 }
@@ -109,6 +112,14 @@ pub async fn web_search_structured(
     query: &str,
     settings: &HashMap<String, String>,
 ) -> Result<WebSearchOutcome> {
+    web_search_structured_with_cutoff(query, settings, None).await
+}
+
+async fn web_search_structured_with_cutoff(
+    query: &str,
+    settings: &HashMap<String, String>,
+    cutoff_date: Option<&str>,
+) -> Result<WebSearchOutcome> {
     let provider = settings
         .get("web_search_provider")
         .map(|value| value.trim())
@@ -120,12 +131,28 @@ pub async fn web_search_structured(
             .map(|raw| parse_tavily_keys(raw))
             .unwrap_or_default();
         if !keys.is_empty() {
-            return tavily_search_rotating(query, &keys).await;
+            return tavily_search_rotating(query, &keys, cutoff_date).await;
         }
         // 选了 Tavily 但一个 Key 都没填：回退到免费的 DuckDuckGo，保证搜索不中断。
     }
 
-    duckduckgo_search(query).await
+    duckduckgo_search(query, cutoff_date).await
+}
+
+fn normalize_cutoff_date(value: Option<&str>) -> Result<Option<String>, String> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    let parsed = NaiveDate::parse_from_str(value, "%Y-%m-%d")
+        .map_err(|_| "网络检索截止日期格式无效，请使用 YYYY-MM-DD".to_string())?;
+    Ok(Some(parsed.format("%Y-%m-%d").to_string()))
+}
+
+fn exclusive_end_date(cutoff_date: &str) -> Result<String> {
+    let cutoff = NaiveDate::parse_from_str(cutoff_date, "%Y-%m-%d")?;
+    Ok((cutoff + ChronoDuration::days(1))
+        .format("%Y-%m-%d")
+        .to_string())
 }
 
 /// 把结构化结果渲染为对话工具消费的纯文本，尽量保持与旧版一致的可读格式。
@@ -183,12 +210,16 @@ pub(crate) fn parse_tavily_keys(raw: &str) -> Vec<String> {
 
 /// 轮询多个 Key：从一个轮换起点开始依次尝试，命中即返回；单个 Key 失败（额度/鉴权/网络）就换下一个。
 /// 全部失败时回退 DuckDuckGo，保证搜索不中断。
-async fn tavily_search_rotating(query: &str, keys: &[String]) -> Result<WebSearchOutcome> {
+async fn tavily_search_rotating(
+    query: &str,
+    keys: &[String],
+    cutoff_date: Option<&str>,
+) -> Result<WebSearchOutcome> {
     let start = TAVILY_CURSOR.fetch_add(1, Ordering::Relaxed) % keys.len();
     let mut last_err = String::new();
     for offset in 0..keys.len() {
         let key = &keys[(start + offset) % keys.len()];
-        match tavily_search_once(query, key).await {
+        match tavily_search_once(query, key, cutoff_date).await {
             Ok((answer, items)) => {
                 return Ok(WebSearchOutcome {
                     provider: "tavily".into(),
@@ -201,12 +232,16 @@ async fn tavily_search_rotating(query: &str, keys: &[String]) -> Result<WebSearc
         }
     }
 
-    let mut fallback = duckduckgo_search(query).await?;
-    fallback.note = Some(format!(
+    let mut fallback = duckduckgo_search(query, cutoff_date).await?;
+    let tavily_note = format!(
         "Tavily 的 {} 个 Key 均不可用：{}，已回退 DuckDuckGo",
         keys.len(),
         last_err
-    ));
+    );
+    fallback.note = Some(match fallback.note.take() {
+        Some(date_note) => format!("{tavily_note}；{date_note}"),
+        None => tavily_note,
+    });
     Ok(fallback)
 }
 
@@ -239,20 +274,26 @@ pub async fn tavily_check_key(api_key: &str) -> Result<()> {
 async fn tavily_search_once(
     query: &str,
     api_key: &str,
+    cutoff_date: Option<&str>,
 ) -> Result<(Option<String>, Vec<WebSearchItem>)> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .build()?;
 
+    let mut payload = serde_json::json!({
+        "api_key": api_key,
+        "query": query,
+        "search_depth": "basic",
+        "max_results": 5,
+        "include_answer": true,
+    });
+    if let Some(cutoff_date) = cutoff_date {
+        payload["end_date"] = serde_json::json!(exclusive_end_date(cutoff_date)?);
+    }
+
     let resp = client
         .post("https://api.tavily.com/search")
-        .json(&serde_json::json!({
-            "api_key": api_key,
-            "query": query,
-            "search_depth": "basic",
-            "max_results": 5,
-            "include_answer": true,
-        }))
+        .json(&payload)
         .send()
         .await?;
 
@@ -284,16 +325,20 @@ async fn tavily_search_once(
     Ok((answer, items))
 }
 
-async fn duckduckgo_search(query: &str) -> Result<WebSearchOutcome> {
+async fn duckduckgo_search(query: &str, cutoff_date: Option<&str>) -> Result<WebSearchOutcome> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(12))
         .user_agent("xiaoyan-desktop/0.3.3")
         .build()?;
 
+    let dated_query = match cutoff_date {
+        Some(cutoff_date) => format!("{query} before:{}", exclusive_end_date(cutoff_date)?),
+        None => query.to_string(),
+    };
     let resp = client
         .get("https://api.duckduckgo.com/")
         .query(&[
-            ("q", query),
+            ("q", dated_query.as_str()),
             ("format", "json"),
             ("no_html", "1"),
             ("skip_disambig", "1"),
@@ -369,7 +414,9 @@ async fn duckduckgo_search(query: &str) -> Result<WebSearchOutcome> {
     Ok(WebSearchOutcome {
         provider: "duckduckgo".into(),
         answer,
-        note: None,
+        note: cutoff_date.map(|date| {
+            format!("DuckDuckGo 回退检索已附加截止日期 {date}，日期精度受来源页面元数据影响。")
+        }),
         items,
     })
 }
@@ -378,4 +425,19 @@ async fn duckduckgo_search(query: &str) -> Result<WebSearchOutcome> {
 fn ddg_title(text: &str) -> String {
     let head = text.split(" - ").next().unwrap_or(text).trim();
     head.chars().take(80).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{exclusive_end_date, normalize_cutoff_date};
+
+    #[test]
+    fn cutoff_date_is_normalized_and_converted_to_an_exclusive_end() {
+        assert_eq!(
+            normalize_cutoff_date(Some("2023-05-02")).unwrap(),
+            Some("2023-05-02".to_string())
+        );
+        assert_eq!(exclusive_end_date("2023-05-02").unwrap(), "2023-05-03");
+        assert!(normalize_cutoff_date(Some("2023-02-30")).is_err());
+    }
 }

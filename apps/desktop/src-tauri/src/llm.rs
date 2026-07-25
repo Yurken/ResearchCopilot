@@ -498,6 +498,31 @@ impl LlmClient {
         }
     }
 
+    /// Resolve the literature-search model without losing the Xiaoyan main-model scope.
+    /// Priority: dedicated literature scout -> Xiaoyan main role -> global provider.
+    pub fn literature_client_with_main_fallback(
+        s: &HashMap<String, String>,
+    ) -> Result<(Self, Option<String>)> {
+        let (client, scoped) = Self::scoped_client_from_settings(
+            s,
+            &[
+                "multi_agent_literature_scout_base_url",
+                "copilot_simple_base_url",
+            ],
+            &[
+                "multi_agent_literature_scout_api_key",
+                "copilot_simple_api_key",
+            ],
+            &["multi_agent_literature_scout_model", "copilot_simple_model"],
+        )?;
+        let model = if scoped {
+            None
+        } else {
+            resolve_model(s, &["copilot_simple_model"])
+        };
+        Ok((client, model))
+    }
+
     /// Vision chat — send one image + text prompt to a multimodal model.
     /// `image_b64` is the base64-encoded image bytes; `media_type` is e.g. "image/png".
     /// Fails silently (callers should handle errors) if the model doesn't support vision.

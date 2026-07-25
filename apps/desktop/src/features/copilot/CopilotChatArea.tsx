@@ -55,6 +55,7 @@ interface CopilotChatAreaProps {
   editingMessageId: string | null;
   editText: string;
   copiedId: string | null;
+  sessionId?: string | null;
   onClearError: () => void;
   onCopy: (text: string, id: string) => void;
   onRetry: (assistantMsgId: string) => void;
@@ -67,16 +68,21 @@ interface CopilotChatAreaProps {
 export function CopilotChatArea(props: CopilotChatAreaProps) {
   const {
     messages, chatMode, agentRuns, plan, routingDecision, activeAssistantId, sending, searchingQuery,
-    loadError, editingMessageId, editText, copiedId,
+    loadError, editingMessageId, editText, copiedId, sessionId,
     onClearError, onCopy, onRetry, onStartEdit, onSaveEdit, onCancelEdit,
     onEditTextChange,
   } = props;
 
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrolledSessionRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    if (messages.length === 0) return;
+    const key = sessionId ?? "draft";
+    const isInitial = !scrolledSessionRef.current.has(key);
+    bottomRef.current?.scrollIntoView({ behavior: isInitial ? "auto" : "smooth" });
+    scrolledSessionRef.current.add(key);
+  }, [messages, sessionId]);
 
   const displayedRuns = [...agentRuns].sort((a, b) => a.order_index - b.order_index);
 

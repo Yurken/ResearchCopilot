@@ -21,6 +21,7 @@ const reference: DocumentInspection = {
   fontSizesPt: [12],
   text: "A4，正文宋体小四",
   pageNumbers: [1, 2],
+  pageNumberEvidence: "rendered",
   blankPages: [],
   hasComments: false,
   hasRevisions: false,
@@ -63,6 +64,7 @@ describe("useDocumentChecker", () => {
     expect(inspectPdf).toHaveBeenCalledOnce();
     expect(result.current.report?.reference.fileName).toBe("投稿规范.docx");
     expect(result.current.report?.candidate.fileName).toBe("论文成稿.pdf");
+    expect(result.current.referenceMode).toBe("explicit_rules");
   });
 
   it("替换任意文档时清空旧报告", async () => {
@@ -79,6 +81,22 @@ describe("useDocumentChecker", () => {
 
     await act(() => result.current.chooseFile("reference"));
     expect(result.current.referenceFile?.name).toBe("新版规范.docx");
+    expect(result.current.report).toBeNull();
+  });
+
+  it("切换规范文件角色时清空旧报告", async () => {
+    vi.mocked(open)
+      .mockResolvedValueOnce("/tmp/投稿规范.docx")
+      .mockResolvedValueOnce("/tmp/论文成稿.pdf");
+    const { result } = renderHook(() => useDocumentChecker());
+
+    await act(() => result.current.chooseFile("reference"));
+    await act(() => result.current.chooseFile("candidate"));
+    await act(() => result.current.runComparison());
+    expect(result.current.report).not.toBeNull();
+
+    act(() => result.current.setReferenceMode("template"));
+    expect(result.current.referenceMode).toBe("template");
     expect(result.current.report).toBeNull();
   });
 });

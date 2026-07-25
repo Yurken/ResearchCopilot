@@ -1,4 +1,4 @@
-import type { ArxivRankingMode, ArxivSearchRequest } from "@research-copilot/types";
+import type { ArxivRankingMode, ArxivSearchRequest, WebSearchOutcome } from "@research-copilot/types";
 
 export const ARXIV_CATEGORIES: Array<{ domain: string; items: Array<{ id: string; zh: string }> }> = [
   {
@@ -250,11 +250,67 @@ export function hasStructuredArxivTerms(request: ArxivSearchRequest) {
   );
 }
 
-export function buildAppliedFilterEntries(filters?: ArxivSearchRequest | null) {
+export function hasPaperDiscoveryCriteria(request: ArxivSearchRequest) {
+  return Boolean(request.topic?.trim()) || hasStructuredArxivTerms(request);
+}
+
+export function buildWebSupplementQuery(request: ArxivSearchRequest) {
+  return [
+    request.topic,
+    ...(request.all_terms ?? []),
+    ...(request.title_terms ?? []),
+    ...(request.abstract_terms ?? []),
+    ...(request.authors ?? []),
+    ...(request.categories ?? []),
+    ...(request.comments_terms ?? []),
+    ...(request.journal_ref_terms ?? []),
+  ]
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value))
+    .join(", ");
+}
+
+export function mergeWebSearchOutcomes(outcomes: WebSearchOutcome[]): WebSearchOutcome | null {
+  if (outcomes.length === 0) return null;
+
+  const providers = [...new Set(outcomes.map((outcome) => outcome.provider).filter(Boolean))];
+  const answers = [...new Set(outcomes.map((outcome) => outcome.answer?.trim()).filter(Boolean))];
+  const notes = [...new Set(outcomes.map((outcome) => outcome.note?.trim()).filter(Boolean))];
+  const seen = new Set<string>();
+  const items = outcomes.flatMap((outcome) => outcome.items).filter((item) => {
+    const key = (item.url || item.title).trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  return {
+    provider: providers.join(" + ") || "web",
+    answer: answers.length > 0 ? answers.join("\n\n") : null,
+    note: notes.length > 0 ? notes.join("；") : null,
+    items,
+  };
+}
+
+export function formatDateInput(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+export function getDefaultCutoffDate(daysAgo = 0, now = new Date()) {
+  const cutoff = new Date(now);
+  cutoff.setHours(0, 0, 0, 0);
+  cutoff.setDate(cutoff.getDate() - Math.max(0, daysAgo));
+  return formatDateInput(cutoff);
+}
+
+export function buildAppliedFilterEntries(filters?: ArxivSearchRequest | null, cutoffDate?: string) {
   if (!filters) return [];
 
   return [
-    { label: "研究主题", values: filters.topic?.trim() ? [filters.topic.trim()] : [] },
+    { label: "自然语言需求", values: filters.topic?.trim() ? [filters.topic.trim()] : [] },
     { label: "通用词(all)", values: filters.all_terms ?? [] },
     { label: "标题词(ti)", values: filters.title_terms ?? [] },
     { label: "摘要词(abs)", values: filters.abstract_terms ?? [] },
@@ -263,6 +319,7 @@ export function buildAppliedFilterEntries(filters?: ArxivSearchRequest | null) {
     { label: "备注(co)", values: filters.comments_terms ?? [] },
     { label: "期刊/jr", values: filters.journal_ref_terms ?? [] },
     { label: "排除词", values: filters.exclude_terms ?? [] },
+    { label: "截止日期", values: cutoffDate ? [cutoffDate] : [] },
   ].filter((entry) => entry.values.length > 0);
 }
 

@@ -10,6 +10,7 @@ import ReaderToolbar from "../features/reader/ReaderToolbar";
 import ReaderZoomControl from "../features/reader/ReaderZoomControl";
 import ReaderQaPanel from "../features/reader/ReaderQaPanel";
 import ReaderRightRail, { type ReaderRightPanel } from "../features/reader/ReaderRightRail";
+import ReaderResearchActionsPanel from "../features/reader/research-actions/ReaderResearchActionsPanel";
 import SelectionPopup from "../features/reader/SelectionPopup";
 import { useReaderNotes } from "../features/reader/useReaderNotes";
 import { useReaderTranslation } from "../features/reader/useReaderTranslation";
@@ -375,6 +376,18 @@ export default function PaperReader() {
             error={qa.error}
             onAsk={(question, page) => void qa.ask(question, page)}
             onClear={qa.clear}
+            onCollapse={() => setRightPanel(null)}
+            onDragStart={(event) => rightPanelSize.onDragStart(event, "left")}
+          />
+        ) : null}
+
+        {rightPanel === "research" ? (
+          <ReaderResearchActionsPanel
+            paper={paper}
+            page={readerProgress.progress.page}
+            selection={selection?.text}
+            pageText={navigation.pages.find((item) => item.page === readerProgress.progress.page)?.text}
+            width={rightPanelSize.width}
             onCollapse={() => setRightPanel(null)}
             onDragStart={(event) => rightPanelSize.onDragStart(event, "left")}
           />

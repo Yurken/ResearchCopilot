@@ -1,10 +1,13 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useExperimentWorkingDirectory } from "../../features/experiment/useExperimentWorkingDirectory";
+import { getInvokeMock, resetInvokeMock } from "../mocks/tauri";
 
 describe("useExperimentWorkingDirectory", () => {
   beforeEach(() => {
     localStorage.clear();
+    resetInvokeMock();
+    getInvokeMock().mockResolvedValue(undefined);
   });
 
   it("按实验分别保存工作目录", async () => {
@@ -15,6 +18,10 @@ describe("useExperimentWorkingDirectory", () => {
 
     act(() => result.current[1]("/project/one"));
     expect(result.current[0]).toBe("/project/one");
+    expect(getInvokeMock()).toHaveBeenCalledWith("experiment_update", {
+      id: "experiment-1",
+      defaultWorkingDir: "/project/one",
+    });
 
     rerender({ experimentId: "experiment-2" });
     expect(result.current[0]).toBeNull();

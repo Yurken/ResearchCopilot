@@ -29,6 +29,8 @@ export interface PendingSkillFill {
 export interface UseCopilotChatOptions {
   currentSession: ChatSession | null;
   selectedInterestId: string;
+  contextType?: string;
+  contextId?: string;
   chatMode: ChatMode;
   skills: Skill[];
   selectedSkillId: string | null;
@@ -43,6 +45,8 @@ export function useCopilotChat(options: UseCopilotChatOptions) {
   const {
     currentSession,
     selectedInterestId,
+    contextType,
+    contextId,
     chatMode,
     skills,
     selectedSkillId,
@@ -250,8 +254,8 @@ export function useCopilotChat(options: UseCopilotChatOptions) {
           {
             session_id: currentSession?.id,
             message: submittedText,
-            context_type: selectedInterestId ? "interest" : "general",
-            context_id: selectedInterestId || undefined,
+            context_type: contextType || (selectedInterestId ? "interest" : "general"),
+            context_id: contextId || selectedInterestId || undefined,
             chat_mode: chatMode,
             images: images.length ? images : undefined,
           },
@@ -347,7 +351,7 @@ export function useCopilotChat(options: UseCopilotChatOptions) {
         if (streamAbortRef.current === abortController) streamAbortRef.current = null;
       }
     },
-    [chatMode, currentSession, selectedInterestId, cancelActiveStream, onSessionCreated, promoteDraftSession]
+    [chatMode, currentSession, selectedInterestId, contextType, contextId, cancelActiveStream, onSessionCreated, promoteDraftSession]
   );
 
   // 实际发送：组装发送文本（含技能注入标记）、校验视觉模型、追加用户消息并驱动流式。

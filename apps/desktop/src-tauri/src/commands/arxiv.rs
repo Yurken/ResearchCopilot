@@ -13,7 +13,7 @@ use std::time::{Duration as StdDuration, Instant};
 use tauri::State;
 
 const ARXIV_API_URL: &str = "https://export.arxiv.org/api/query";
-const ARXIV_USER_AGENT: &str = "xiaoyan-desktop/0.5.1 (+https://github.com/Yurken/xiaoyan)";
+const ARXIV_USER_AGENT: &str = "xiaoyan-desktop/0.5.2 (+https://github.com/Yurken/xiaoyan)";
 const ARXIV_MIN_INTERVAL_SECS: f64 = 3.5;
 const ARXIV_MAX_RETRIES: u32 = 3;
 

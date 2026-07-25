@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use super::papers::papers_upload;
 
-const FIELD_DYNAMICS_IMPORT_USER_AGENT: &str = "XiaoYanDesktop/0.5.1 (+https://github.com/openai)";
+const FIELD_DYNAMICS_IMPORT_USER_AGENT: &str = "XiaoYanDesktop/0.5.2 (+https://github.com/openai)";
 
 fn resolve_pdf_url(raw_pdf_url: &str, external_id: &str, source: &str) -> String {
     let pdf_url = raw_pdf_url.trim();

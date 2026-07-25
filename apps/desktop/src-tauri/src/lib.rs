@@ -122,7 +122,10 @@ use commands::{
     paper_cross_analysis::papers_cross_analysis,
     paper_figures::papers_list_figures,
     paper_notes::{paper_notes_create, paper_notes_delete, paper_notes_list, paper_notes_update},
-    paper_search::paper_search,
+    paper_search::{
+        paper_search, paper_search_delete_history, paper_search_get_history,
+        paper_search_save_history,
+    },
     papers::{
         papers_analyze, papers_delete, papers_extract_pdf_text, papers_generate_note, papers_get,
         papers_list, papers_list_parse_runs, papers_merge, papers_open_pdf, papers_reorder,
@@ -546,6 +549,9 @@ pub fn run() {
             artifact_delete,
             // Paper search
             paper_search,
+            paper_search_save_history,
+            paper_search_get_history,
+            paper_search_delete_history,
             // Web search
             web_search_query,
             // Knowledge

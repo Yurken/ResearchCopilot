@@ -42,6 +42,7 @@ const COMPARISON_STATUS = {
   match: { label: "一致", variant: "success" as const, icon: CheckCircle2, color: "var(--rc-apple-green, #1A9E3F)" },
   mismatch: { label: "有差异", variant: "warning" as const, icon: XCircle, color: "var(--rc-warning, #C07000)" },
   unavailable: { label: "待确认", variant: "default" as const, icon: HelpCircle, color: "var(--rc-text-muted)" },
+  not_applicable: { label: "不适用", variant: "default" as const, icon: Info, color: "var(--rc-text-muted)" },
 };
 
 function formatDimensions(inspection: DocumentInspection) {
@@ -128,7 +129,7 @@ export function DocumentComparisonReportPanel({ report }: { report: DocumentComp
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h3 className="text-sm font-semibold text-ink-primary">规范比对结果</h3>
-            <p className="mt-1 text-xs leading-5 text-ink-tertiary">优先采用规范正文中的明确要求，其余项目以规范文档本身的版式为基线。</p>
+            <p className="mt-1 text-xs leading-5 text-ink-tertiary">按所选文件角色决定规则来源；未明确或无法可靠解析的项目会标为待确认。</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Badge variant="success">{matchedCount} 项一致</Badge>
@@ -167,6 +168,27 @@ export function DocumentComparisonReportPanel({ report }: { report: DocumentComp
               ) : <p className="text-xs text-ink-tertiary">暂无明确通过项。</p>}
             </CardSection>
           </Card>
+
+          {report.notices.length > 0 ? (
+            <Card padding="md">
+              <div className="flex items-center gap-2">
+                <HelpCircle className="h-4 w-4 text-ink-tertiary" />
+                <h3 className="text-sm font-semibold text-ink-primary">待确认与不适用</h3>
+                <Badge>{report.notices.length}</Badge>
+              </div>
+              <CardSection>
+                <ul className="space-y-3 text-xs leading-5 text-ink-tertiary">
+                  {report.notices.map((notice) => (
+                    <li key={notice.id}>
+                      <span className="font-medium text-ink-secondary">{notice.status === "unavailable" ? "待确认" : "不适用"}：</span>
+                      {notice.message}
+                      <p className="mt-0.5 text-[11px]">{notice.suggestion}</p>
+                    </li>
+                  ))}
+                </ul>
+              </CardSection>
+            </Card>
+          ) : null}
         </div>
 
         <Card padding="md" className="min-w-0">
