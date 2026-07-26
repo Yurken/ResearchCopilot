@@ -1,6 +1,19 @@
 export type PptMode = "topic" | "document" | "outline";
 export type PptStatus = "idle" | "drafting" | "repairing" | "building" | "ready" | "error";
-export type PptLayout = "title" | "section" | "content" | "two_column" | "highlight" | "timeline";
+export type PptLayout =
+  | "title"
+  | "section"
+  | "content"
+  | "two_column"
+  | "highlight"
+  | "timeline"
+  | "agenda"
+  | "comparison"
+  | "process"
+  | "data_chart"
+  | "image_focus"
+  | "quote"
+  | "summary";
 
 export interface PptSlide {
   layout: PptLayout;
@@ -12,6 +25,14 @@ export interface PptSlide {
   highlight?: string;
   steps?: string[];
   note?: string;
+  /** 数据图表页的结构化数据（供后续渲染图表使用）。 */
+  chart?: { type: "bar" | "line" | "pie"; labels: string[]; values: number[]; source?: string };
+  /** 图片页的图片来源或生成方式说明。 */
+  imageSource?: string;
+  /** 引用页的引用文本。 */
+  quote?: string;
+  /** 页面额外元数据（扩展字段）。 */
+  meta?: Record<string, unknown>;
 }
 
 export interface PptData {
@@ -50,7 +71,39 @@ export const PPT_LAYOUT_LABELS: Record<PptLayout, string> = {
   two_column: "双列页",
   highlight: "结论页",
   timeline: "流程页",
+  agenda: "目录页",
+  comparison: "对比页",
+  process: "流程页",
+  data_chart: "数据页",
+  image_focus: "图文页",
+  quote: "引用页",
+  summary: "总结页",
 };
+
+/**
+ * 将扩展布局名映射到当前渲染器可处理的基准布局，保持向后兼容。
+ * 新增布局优先复用已有渲染逻辑，避免一次性重写整个 PPTX 构建器。
+ */
+export function mapPptLayoutToBase(layout: PptLayout): Exclude<PptLayout, "agenda" | "comparison" | "process" | "data_chart" | "image_focus" | "quote" | "summary"> {
+  switch (layout) {
+    case "agenda":
+      return "content";
+    case "comparison":
+      return "two_column";
+    case "process":
+      return "timeline";
+    case "data_chart":
+      return "highlight";
+    case "image_focus":
+      return "content";
+    case "quote":
+      return "highlight";
+    case "summary":
+      return "title";
+    default:
+      return layout;
+  }
+}
 
 export function parsePptPageCount(value: string) {
   const normalized = value.trim();

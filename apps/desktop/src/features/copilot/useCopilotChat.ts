@@ -14,6 +14,8 @@ import {
   writeCopilotSessionSnapshot,
 } from "./copilotSessionState";
 import { apiClient, formatErrorMessage } from "../../lib/client";
+import { executeToolSkill, ToolSkillNotImplementedError } from "../tools/registry/executeToolSkill";
+import type { ToolAttachment, ToolProgress } from "../tools/registry/types";
 import type { AgentPlanStep, AgentRun, ChatMessage, ChatMode, ChatSession, RoutingDecision, Skill } from "@research-copilot/types";
 
 const DEFAULT_ATTACHMENT_PROMPT = "请先阅读我上传的文件，并给我一个简洁的重点概览。";
@@ -405,10 +407,151 @@ export function useCopilotChat(options: UseCopilotChatOptions) {
     [attachments, clearAttachments, runChatStream, onSkillConsumed],
   );
 
+  // 工具技能执行：前端本地运行 Tool Registry，生成 Artifact 后持久化到会话。
+  const runToolSkill = useCallback(
+    async (rawText: string, skill: Skill) => {
+      if (skill.kind !== "tool") return;
+
+      const abortController = new AbortController();
+      streamAbortRef.current = abortController;
+      setSending(true);
+      setLoadError("");
+      setPlan([]);
+      setAgentRuns([]);
+      setRequestId(undefined);
+      setSearchingQuery(null);
+      setRoutingDecision(null);
+
+      const assistantId = `${Date.now()}_a`;
+      const userMsg: ChatMessage = {
+        id: `${Date.now()}_u`,
+        role: "user",
+        content: rawText,
+        created_at: new Date().toISOString(),
+      };
+      const assistantMsg: ChatMessage = {
+        id: assistantId,
+        role: "assistant",
+        content: "",
+        created_at: new Date().toISOString(),
+      };
+
+      setInput("");
+      clearAttachments();
+      onSkillConsumed?.();
+      setMessages((prev) => [...prev, userMsg, assistantMsg]);
+
+      const report = (progress: ToolProgress) => {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId ? { ...m, content: progress.message } : m
+          )
+        );
+      };
+
+      try {
+        const textAttachments: ToolAttachment[] = attachments.map((a) => ({
+          name: a.name,
+          extension: a.extension,
+          mediaTypeLabel: a.mediaTypeLabel,
+          content: a.kind !== "image" ? a.content : "",
+          kind: a.kind === "image" ? "image" : "text",
+          imageData: a.kind === "image" ? a.imageData : undefined,
+          imageMediaType: a.kind === "image" ? a.imageMediaType : undefined,
+        }));
+
+        const result = await executeToolSkill(skill.name, {
+          sessionId: currentSession?.id,
+          userMessage: rawText,
+          attachments: textAttachments,
+          signal: abortController.signal,
+          onProgress: report,
+        });
+
+        if (abortController.signal.aborted) {
+          throw new DOMException("已取消生成", "AbortError");
+        }
+
+        const finalAssistant: ChatMessage = {
+          ...assistantMsg,
+          content: result.content,
+          artifacts: result.artifacts,
+        };
+        setMessages((prev) =>
+          prev.map((m) => (m.id === assistantId ? finalAssistant : m))
+        );
+
+        // 持久化到会话
+        const session = await apiClient.chat.ensureSession({
+          sessionId: currentSession?.id,
+          title: rawText.slice(0, 40),
+          contextType: selectedInterestId ? "interest" : "general",
+          contextId: selectedInterestId || undefined,
+        });
+
+        await apiClient.chat.saveMessage({
+          session_id: session.id,
+          role: "user",
+          content: rawText,
+        });
+        await apiClient.chat.saveMessage({
+          session_id: session.id,
+          role: "assistant",
+          content: result.content,
+          artifacts: result.artifacts,
+        });
+
+        if (!currentSession) {
+          promoteDraftSession(session.id);
+          onSessionCreated(session.id);
+        }
+      } catch (error) {
+        if ((error as Error)?.name === "AbortError") {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId
+                ? { ...m, content: "生成已取消。" }
+                : m
+            )
+          );
+        } else if (error instanceof ToolSkillNotImplementedError) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId
+                ? { ...m, content: `该工具技能尚未实现：${skill.title}` }
+                : m
+            )
+          );
+        } else {
+          const msg = formatErrorMessage(error);
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId
+                ? { ...m, content: `执行失败：${msg}` }
+                : m
+            )
+          );
+        }
+      } finally {
+        setSending(false);
+        if (streamAbortRef.current === abortController) {
+          streamAbortRef.current = null;
+        }
+      }
+    },
+    [attachments, clearAttachments, currentSession, onSessionCreated, onSkillConsumed, promoteDraftSession, selectedInterestId],
+  );
+
   const handleSend = useCallback(async () => {
     if ((!input.trim() && attachments.length === 0) || sending) return;
     const rawText = input.trim() || DEFAULT_ATTACHMENT_PROMPT;
     const selSkill = skills.find((s) => s.id === selectedSkillId) ?? null;
+
+    if (selSkill?.kind === "tool") {
+      await runToolSkill(rawText, selSkill);
+      return;
+    }
+
     // 技能含 {{变量}} 时先弹出填写表单，填好再发送。
     if (selSkill) {
       const variables = extractSkillVariables(selSkill.prompt);
@@ -418,7 +561,7 @@ export function useCopilotChat(options: UseCopilotChatOptions) {
       }
     }
     await sendChat(rawText, selSkill, selSkill ? selSkill.prompt : null);
-  }, [input, attachments, sending, skills, selectedSkillId, sendChat]);
+  }, [input, attachments, sending, skills, selectedSkillId, runToolSkill, sendChat]);
 
   // 变量填写确认：用填写值替换占位符后发送。
   const confirmSkillFill = useCallback(

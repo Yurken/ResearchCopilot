@@ -12,9 +12,13 @@
     "updater:default",
     "fs:default",
     "fs:scope-home-recursive",
+    "fs:allow-appdata-read-recursive",
+    "fs:allow-appdata-write-recursive",
     "fs:allow-read-file",
     "fs:allow-read-text-file",
     "fs:allow-write-file",
-    "fs:allow-write-text-file"
+    "fs:allow-write-text-file",
+    "opener:allow-open-path",
+    "opener:allow-reveal-item-in-dir"
   ]
 }

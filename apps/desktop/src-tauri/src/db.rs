@@ -170,6 +170,7 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     content    TEXT NOT NULL,
     sources    TEXT,
     images     TEXT,
+    artifacts  TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -198,6 +199,20 @@ CREATE TABLE IF NOT EXISTS agent_artifacts (
     content       TEXT NOT NULL,
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS artifacts (
+    id            TEXT PRIMARY KEY,
+    kind          TEXT NOT NULL,
+    name          TEXT NOT NULL,
+    mime_type     TEXT NOT NULL,
+    local_path    TEXT NOT NULL,
+    size          INTEGER NOT NULL,
+    title         TEXT,
+    description   TEXT,
+    metadata_json TEXT,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_artifacts_created_at ON artifacts(created_at DESC);
 
 CREATE TABLE IF NOT EXISTS paper_figures (
     id         TEXT PRIMARY KEY,
@@ -504,6 +519,8 @@ pub async fn init_db(app_data_dir: &Path) -> Result<SqlitePool> {
     ensure_paper_corpus_table(&pool).await?;
     ensure_token_usage_char_columns(&pool).await?;
     ensure_sync_tables(&pool).await?;
+    ensure_artifacts_table(&pool).await?;
+    ensure_chat_messages_artifacts_column(&pool).await?;
     reset_stale_research_interest_plans(&pool).await?;
     ensure_github_project_search_history_table(&pool).await?;
     ensure_paper_search_history_table(&pool).await?;
@@ -1224,6 +1241,32 @@ pub async fn ensure_opencode_tables(pool: &SqlitePool) -> Result<()> {
     Ok(())
 }
 
+pub async fn ensure_artifacts_table(pool: &SqlitePool) -> Result<()> {
+    sqlx::raw_sql(
+        "CREATE TABLE IF NOT EXISTS artifacts (
+            id            TEXT PRIMARY KEY,
+            kind          TEXT NOT NULL,
+            name          TEXT NOT NULL,
+            mime_type     TEXT NOT NULL,
+            local_path    TEXT NOT NULL,
+            size          INTEGER NOT NULL,
+            title         TEXT,
+            description   TEXT,
+            metadata_json TEXT,
+            created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_artifacts_created_at ON artifacts(created_at DESC);",
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn ensure_chat_messages_artifacts_column(pool: &SqlitePool) -> Result<()> {
+    ensure_table_column(pool, "chat_messages", "artifacts", "TEXT").await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1451,7 +1494,10 @@ mod tests {
             ("experiment_records", "default_working_dir"),
             ("experiment_attachments", "snapshot_id"),
         ] {
-            assert!(column_exists(&pool, table, column).await?, "{table}.{column}");
+            assert!(
+                column_exists(&pool, table, column).await?,
+                "{table}.{column}"
+            );
         }
         for table in ["experiment_code_sessions", "experiment_snapshots"] {
             assert!(table_exists(&pool, table).await?, "{table}");

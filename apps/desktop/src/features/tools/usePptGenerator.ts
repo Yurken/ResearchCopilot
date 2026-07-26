@@ -1,12 +1,21 @@
 import { useEffect, useRef, useState } from "react";
-import { buildPptx, extractJsonObject, normalizePptData, sanitizePptFileName } from "./ppt";
-import { buildPptPrompt, buildPptRepairPrompt } from "./pptPrompt";
+import { generatePptArtifact, type PptGenerationRequest, type PptGenerationStage } from "./pptService";
 import { apiClient, formatErrorMessage } from "../../lib/client";
 import { parsePptPageCount, type PptData, type PptMode, type PptStatus } from "./pptShared";
 
 function isGeneratingStatus(status: PptStatus) {
   return status === "drafting" || status === "repairing" || status === "building";
 }
+
+const STAGE_TO_STATUS: Record<PptGenerationStage, PptStatus | null> = {
+  parsing: "drafting",
+  planning: "drafting",
+  drafting: "drafting",
+  repairing: "repairing",
+  building: "building",
+  saving: "building",
+  completed: "ready",
+};
 
 export function usePptGenerator() {
   const [mode, setMode] = useState<PptMode>("topic");
@@ -29,6 +38,7 @@ export function usePptGenerator() {
   const [documentLoading, setDocumentLoading] = useState(false);
   const [fileBaseName, setFileBaseName] = useState("slides");
   const runIdRef = useRef(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const documentRunIdRef = useRef(0);
   const prevInputKeyRef = useRef("");
 
@@ -59,6 +69,8 @@ export function usePptGenerator() {
 
     if (isGeneratingStatus(status)) {
       runIdRef.current += 1;
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
       setStatus("idle");
       setBuffer(null);
       setPptData(null);
@@ -174,78 +186,59 @@ export function usePptGenerator() {
                     ? "页数需填写 4 到 40 之间的整数。"
                     : "";
 
-  const streamMessage = async (message: string, runId: number, sessionId?: string) => {
-    let raw = "";
-    let nextSessionId = sessionId ?? "";
-
-    for await (const chunk of apiClient.chat.stream({
-      message,
-      session_id: sessionId || undefined,
-      chat_mode: "direct",
-      tag: "1",
-    })) {
-      if (runId !== runIdRef.current) return null;
-      if (chunk.type === "session_id") nextSessionId = chunk.value;
-      else if (chunk.type === "delta") raw += chunk.value;
-      else if (chunk.type === "error") throw new Error(chunk.value as string);
-    }
-
-    return { raw, sessionId: nextSessionId };
-  };
-
-  const parsePptResponse = (raw: string) => normalizePptData(JSON.parse(extractJsonObject(raw)));
-
   const generate = async () => {
     if (generateDisabledReason) return;
 
-    const prompt = buildPptPrompt({
-      mode,
-      topic,
-      outline,
-      documentContent,
-      styleValue,
-      customStyle,
-      language,
-      pageCount,
-      customPages,
-    });
-
     const runId = ++runIdRef.current;
+    abortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
     setStatus("drafting");
     setBuffer(null);
     setPptData(null);
     setSlideCount(0);
     setError("");
 
+    const request: PptGenerationRequest = {
+      mode,
+      topic,
+      outline,
+      documentName: documentName ?? undefined,
+      documentContent: documentContent ?? undefined,
+      style: styleValue === "custom" ? customStyle : styleValue,
+      language,
+      pageCount: pageCount === "custom" ? parsePptPageCount(customPages) ?? undefined : parsePptPageCount(pageCount) ?? undefined,
+    };
+
     try {
-      const firstPass = await streamMessage(prompt, runId);
-      if (!firstPass) return;
-
-      let data: PptData;
-      try {
-        data = parsePptResponse(firstPass.raw);
-      } catch {
-        if (runId !== runIdRef.current) return;
-        setStatus("repairing");
-        const repaired = await streamMessage(buildPptRepairPrompt(firstPass.raw), runId, firstPass.sessionId);
-        if (!repaired) return;
-        data = parsePptResponse(repaired.raw);
-      }
+      const result = await generatePptArtifact(request, {
+        signal: abortController.signal,
+        onProgress: (progress) => {
+          if (runId !== runIdRef.current) return;
+          const nextStatus = STAGE_TO_STATUS[progress.stage];
+          if (nextStatus) setStatus(nextStatus);
+        },
+      });
 
       if (runId !== runIdRef.current) return;
-      setStatus("building");
-      const nextBuffer = await buildPptx(data);
-      if (runId !== runIdRef.current) return;
-
-      setSlideCount(data.slides.length);
-      setBuffer(nextBuffer);
-      setPptData(data);
-      setFileBaseName(sanitizePptFileName(data.title));
+      setSlideCount(result.slideCount);
+      setBuffer(result.buffer);
+      setPptData(result.data);
+      setFileBaseName(result.fileBaseName);
       setStatus("ready");
     } catch (err) {
       if (runId !== runIdRef.current) return;
-      setError(formatErrorMessage(err));
+      if ((err as Error)?.name === "AbortError") {
+        setError("生成已取消。");
+      } else {
+        setError(formatErrorMessage(err));
+      }
       setStatus("error");
+    } finally {
+      if (abortControllerRef.current === abortController) {
+        abortControllerRef.current = null;
+      }
     }
   };
 
@@ -268,6 +261,12 @@ export function usePptGenerator() {
       setError(formatErrorMessage(err));
     }
   };
+
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, []);
 
   return {
     featureDisabled,
