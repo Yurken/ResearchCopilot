@@ -1,6 +1,7 @@
 pub mod academic_writing;
 pub mod active_researcher;
 pub mod app_lock;
+pub mod artifacts;
 pub mod arxiv;
 pub mod ccf;
 pub mod chat;

@@ -114,12 +114,14 @@ pub async fn chat_get_session(
         .map(|m| {
             let src: Option<String> = m.get("sources");
             let imgs: Option<String> = m.get("images");
+            let artifacts: Option<String> = m.get("artifacts");
             json!({
                 "id": m.get::<String, _>("id"),
                 "role": m.get::<String, _>("role"),
                 "content": m.get::<String, _>("content"),
                 "sources": src.as_deref().and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok()),
                 "images": imgs.as_deref().and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok()),
+                "artifacts": artifacts.as_deref().and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok()),
                 "created_at": m.get::<String, _>("created_at"),
             })
         })
@@ -192,6 +194,140 @@ pub async fn chat_update_session_context(
         "context_id": row.get::<Option<String>, _>("context_id"),
         "created_at": row.get::<String, _>("created_at"),
         "updated_at": row.get::<Option<String>, _>("updated_at"),
+    }))
+}
+
+#[tauri::command]
+pub async fn chat_ensure_session(
+    state: State<'_, AppState>,
+    session_id: Option<String>,
+    title: Option<String>,
+    context_type: Option<String>,
+    context_id: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let normalized_context_id = context_id.and_then(|value| {
+        let trimmed = value.trim().to_string();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    });
+    let ctx_type = scoped_context_type(context_type.as_deref(), normalized_context_id.is_some());
+
+    if let Some(ref id) = session_id {
+        let existing = sqlx::query("SELECT id FROM chat_sessions WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| e.to_string())?;
+        if existing.is_some() {
+            sqlx::query(
+                "UPDATE chat_sessions SET context_type = ?, context_id = ?, updated_at = ? WHERE id = ?",
+            )
+            .bind(&ctx_type)
+            .bind(&normalized_context_id)
+            .bind(&now)
+            .bind(id)
+            .execute(&state.db)
+            .await
+            .map_err(|e| e.to_string())?;
+
+            let row = sqlx::query(
+                "SELECT id, title, context_type, context_id, created_at, updated_at FROM chat_sessions WHERE id = ?",
+            )
+            .bind(id)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| e.to_string())?;
+            return Ok(json!({
+                "id": row.get::<String, _>("id"),
+                "title": row.get::<String, _>("title"),
+                "context_type": row.get::<String, _>("context_type"),
+                "context_id": row.get::<Option<String>, _>("context_id"),
+                "created_at": row.get::<String, _>("created_at"),
+                "updated_at": row.get::<Option<String>, _>("updated_at"),
+            }));
+        }
+    }
+
+    let id = session_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+    let session_title = title.unwrap_or_else(|| "新对话".to_string());
+    sqlx::query(
+        "INSERT INTO chat_sessions (id, title, context_type, context_id, tag, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&id)
+    .bind(&session_title)
+    .bind(&ctx_type)
+    .bind(&normalized_context_id)
+    .bind("0")
+    .bind(&now)
+    .bind(&now)
+    .execute(&state.db)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(json!({
+        "id": id,
+        "title": session_title,
+        "context_type": ctx_type,
+        "context_id": normalized_context_id,
+        "created_at": now,
+        "updated_at": now,
+    }))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatSaveMessageInput {
+    pub session_id: String,
+    pub role: String,
+    pub content: String,
+    #[serde(default)]
+    pub images: Option<serde_json::Value>,
+    #[serde(default)]
+    pub artifacts: Option<serde_json::Value>,
+}
+
+#[tauri::command]
+pub async fn chat_save_message(
+    state: State<'_, AppState>,
+    input: ChatSaveMessageInput,
+) -> Result<serde_json::Value, String> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let id = Uuid::new_v4().to_string();
+    let images_json = input.images.as_ref().map(|v| v.to_string());
+    let artifacts_json = input.artifacts.as_ref().map(|v| v.to_string());
+
+    sqlx::query(
+        "INSERT INTO chat_messages (id, session_id, role, content, images, artifacts, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&id)
+    .bind(&input.session_id)
+    .bind(&input.role)
+    .bind(&input.content)
+    .bind(&images_json)
+    .bind(&artifacts_json)
+    .bind(&now)
+    .execute(&state.db)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    sqlx::query("UPDATE chat_sessions SET updated_at = ? WHERE id = ?")
+        .bind(&now)
+        .bind(&input.session_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(json!({
+        "id": id,
+        "role": input.role,
+        "content": input.content,
+        "images": input.images,
+        "artifacts": input.artifacts,
+        "created_at": now,
     }))
 }
 

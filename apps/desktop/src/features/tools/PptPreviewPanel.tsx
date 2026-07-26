@@ -14,6 +14,13 @@ const layoutBadgeVariant: Record<PptLayout, "default" | "success" | "warning" | 
   two_column: "warning",
   highlight: "success",
   timeline: "purple",
+  agenda: "info",
+  comparison: "warning",
+  process: "purple",
+  data_chart: "success",
+  image_focus: "info",
+  quote: "default",
+  summary: "success",
 };
 
 export function PptPreviewPanel({ data, fileBaseName }: PptPreviewPanelProps) {

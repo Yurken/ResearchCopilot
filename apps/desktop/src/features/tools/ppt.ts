@@ -1,5 +1,5 @@
 import PptxGenJS from "pptxgenjs";
-import type { PptData, PptLayout, PptSlide } from "./pptShared";
+import { mapPptLayoutToBase, type PptData, type PptLayout, type PptSlide } from "./pptShared";
 
 export function sanitizePptFileName(name: string) {
   const cleaned = name
@@ -63,12 +63,16 @@ export function normalizePptData(input: unknown): PptData {
     throw new Error("模型返回格式错误：slides 不能为空。");
   }
 
-  const validLayouts: PptLayout[] = ["title", "section", "content", "two_column", "highlight", "timeline"];
+  const validLayouts: PptLayout[] = [
+    "title", "section", "content", "two_column", "highlight", "timeline",
+    "agenda", "comparison", "process", "data_chart", "image_focus", "quote", "summary",
+  ];
   const slides: PptSlide[] = raw.slides.slice(0, 40).map((slide, index) => {
     const source = (slide && typeof slide === "object" ? slide : {}) as Record<string, unknown>;
-    const layout = (typeof source.layout === "string" && validLayouts.includes(source.layout as PptLayout)
-      ? source.layout
-      : "content") as PptLayout;
+    const rawLayout = typeof source.layout === "string" && validLayouts.includes(source.layout as PptLayout)
+      ? (source.layout as PptLayout)
+      : "content";
+    const layout = mapPptLayoutToBase(rawLayout);
     const title = typeof source.title === "string" && source.title.trim() ? source.title.trim() : `第 ${index + 1} 页`;
 
     const toLines = (value: unknown) =>
@@ -87,6 +91,15 @@ export function normalizePptData(input: unknown): PptData {
     const highlight = typeof source.highlight === "string" ? source.highlight.trim() || undefined : undefined;
     const subtitle = typeof source.subtitle === "string" ? source.subtitle.trim() || undefined : undefined;
     const note = typeof source.note === "string" ? source.note.trim() || undefined : undefined;
+    const quote = typeof source.quote === "string" ? source.quote.trim() || undefined : undefined;
+    const imageSource = typeof source.image_source === "string"
+      ? source.image_source.trim() || undefined
+      : typeof source.imageSource === "string"
+        ? source.imageSource.trim() || undefined
+        : undefined;
+    const chart = source.chart && typeof source.chart === "object"
+      ? (source.chart as PptSlide["chart"])
+      : undefined;
 
     return {
       layout,
@@ -98,6 +111,9 @@ export function normalizePptData(input: unknown): PptData {
       highlight: highlight ?? subtitle ?? bullets?.[0],
       steps,
       note,
+      quote,
+      imageSource,
+      chart,
     };
   });
 

@@ -467,6 +467,28 @@ export interface ChatImageRef {
   name?: string;
 }
 
+export type ArtifactKind =
+  | "pptx"
+  | "docx"
+  | "xlsx"
+  | "pdf"
+  | "image"
+  | "archive"
+  | "other";
+
+export interface Artifact {
+  id: string;
+  kind: ArtifactKind;
+  name: string;
+  mimeType: string;
+  localPath: string;
+  size: number;
+  createdAt: string;
+  title?: string;
+  description?: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
@@ -475,6 +497,8 @@ export interface ChatMessage {
   tool_results?: ChatToolResult[];
   /** 用户消息附带的图片（多模态）；当前仅桌面端在本轮发送/展示，未持久化。 */
   images?: ChatImageRef[];
+  /** 工具技能执行后返回的文件产物，会随消息持久化。 */
+  artifacts?: Artifact[];
   created_at: string;
 }
 
