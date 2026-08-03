@@ -23,8 +23,8 @@
   "dependencies": {
     "@research-copilot/types": "workspace:*",
     "@research-copilot/ui": "workspace:*",
-    "@tauri-apps/api": "^2.6.0",
-    "@tauri-apps/plugin-dialog": "^2.3.0",
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-dialog": "^2.7.2",
     "@tauri-apps/plugin-fs": "^2.5.0",
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-shell": "^2.2.0",
@@ -33,8 +33,8 @@
     "pdfjs-dist": "^5.6.205",
     "pptxgenjs": "^4.0.1",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "react-router-dom": "^7.6.2",
+    "react-dom": "^19.2.8",
+    "react-router-dom": "^7.18.2",
     "tailwind-merge": "^2.6.0"
   },
   "devDependencies": {
@@ -46,7 +46,7 @@
     "@testing-library/user-event": "^14.6.1",
     "@types/node": "^22",
     "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
+    "@types/react-dom": "^19.2.4",
     "@typescript-eslint/parser": "^8.64.0",
     "@vitejs/plugin-react": "^4.0.0",
     "autoprefixer": "^10.5.3",
