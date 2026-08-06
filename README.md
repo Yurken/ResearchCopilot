@@ -133,7 +133,7 @@ packages/
 └── ui/               # 共享 UI 组件
 ```
 
-桌面端是核心产品，新能力默认先在桌面端实现。详细设计见 [桌面端系统介绍](docs/system-introduction-desktop.md) 与 [开发原则](docs/development-principles.md)。
+桌面端是核心产品，新能力默认先在桌面端实现。详细设计见 [桌面端系统介绍](docs/system-introduction-desktop.md)、[开发原则](docs/development-principles.md) 与 [小妍持续进化规划](docs/xiaoyan-continuous-evolution-plan.md)。
 
 小妍内部 LLM Wiki 的自动整理流程、数据模型和检索边界见 [LLM Wiki 与混合检索](docs/llm-wiki-and-hybrid-retrieval.md)。
 

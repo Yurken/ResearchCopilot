@@ -58,6 +58,7 @@ export interface WorkbenchMetric {
 export interface WorkbenchLinkAction {
   label: string;
   to: string;
+  state?: Record<string, unknown>;
 }
 
 const PAPER_TITLE_PREVIEW_LENGTH = 18;
