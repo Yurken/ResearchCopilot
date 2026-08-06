@@ -5,6 +5,10 @@ import type {
   WorkbenchLinkAction,
   WorkbenchTone,
 } from "./shared";
+import {
+  createResearchCheckpointHandoff,
+  RESEARCH_CHECKPOINT_HANDOFF_KEY,
+} from "../research-context/checkpointHandoff";
 
 interface InterestCheckpointSummary {
   count: number;
@@ -46,10 +50,25 @@ function latestCheckpoint(checkpoints: WorkbenchCheckpointItem[]): WorkbenchChec
 }
 
 function checkpointAction(checkpoint: WorkbenchCheckpointItem): WorkbenchLinkAction {
-  if (checkpoint.contextType === "paper" && checkpoint.contextId) {
-    return { label: "打开论文", to: `/papers?paper=${encodeURIComponent(checkpoint.contextId)}` };
-  }
-  return { label: "打开对话", to: "/chat" };
+  const handoff = createResearchCheckpointHandoff({
+    id: checkpoint.id,
+    sessionId: checkpoint.sessionId,
+    contextType: checkpoint.contextType,
+    contextId: checkpoint.contextId,
+    goal: checkpoint.goal,
+    summary: checkpoint.summary,
+    completedItems: checkpoint.completedItems,
+    openQuestions: checkpoint.openQuestions,
+    nextSteps: checkpoint.nextSteps,
+    status: checkpoint.status,
+    updatedAt: checkpoint.updatedAt || checkpoint.createdAt,
+  });
+
+  return {
+    label: checkpoint.status === "failed" ? "恢复任务" : "继续研究",
+    to: "/chat",
+    state: { [RESEARCH_CHECKPOINT_HANDOFF_KEY]: handoff },
+  };
 }
 
 function checkpointTone(checkpoint: WorkbenchCheckpointItem): WorkbenchTone {
