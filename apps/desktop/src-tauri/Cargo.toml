@@ -49,7 +49,7 @@ gag = "1"
 # Encryption for settings export/import (AES-256-GCM + PBKDF2)
 aes-gcm = "0.10"
 pbkdf2 = "0.12"
-sha2 = "0.10"
+sha2 = "0.11"
 hmac = "0.12"
 rand = "0.8"
 # Regex for HTML parsing in web clip
