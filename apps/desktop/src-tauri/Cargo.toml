@@ -37,7 +37,7 @@ anyhow = "1"
 pdf-extract = "0.12"
 roxmltree = "0.20"
 # PDF image extraction
-lopdf = "0.32"
+lopdf = "0.42"
 # Zlib decompression for FlateDecode PDF images
 flate2 = "1"
 # Image encoding (PNG/JPEG)
