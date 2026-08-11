@@ -1,0 +1,212 @@
+{
+  "suite": "LitSearch",
+  "selection": "stratified_without_replacement_after_exclusion",
+  "stratification_fields": [
+    "query_set",
+    "specificity",
+    "quality"
+  ],
+  "seed": 20260810,
+  "sample_count": 80,
+  "dataset_sha256": "b66811bb32849987dbbf1d35a544b77a3cb3f8a21f7f73d947fb8fdad2f4f03f",
+  "case_ids": [
+    "litsearch-0080",
+    "litsearch-0081",
+    "litsearch-0088",
+    "litsearch-0094",
+    "litsearch-0096",
+    "litsearch-0098",
+    "litsearch-0103",
+    "litsearch-0107",
+    "litsearch-0115",
+    "litsearch-0119",
+    "litsearch-0125",
+    "litsearch-0138",
+    "litsearch-0146",
+    "litsearch-0159",
+    "litsearch-0160",
+    "litsearch-0176",
+    "litsearch-0181",
+    "litsearch-0194",
+    "litsearch-0197",
+    "litsearch-0205",
+    "litsearch-0206",
+    "litsearch-0207",
+    "litsearch-0216",
+    "litsearch-0222",
+    "litsearch-0223",
+    "litsearch-0229",
+    "litsearch-0234",
+    "litsearch-0237",
+    "litsearch-0255",
+    "litsearch-0261",
+    "litsearch-0264",
+    "litsearch-0265",
+    "litsearch-0270",
+    "litsearch-0275",
+    "litsearch-0277",
+    "litsearch-0297",
+    "litsearch-0317",
+    "litsearch-0319",
+    "litsearch-0332",
+    "litsearch-0334",
+    "litsearch-0345",
+    "litsearch-0347",
+    "litsearch-0355",
+    "litsearch-0357",
+    "litsearch-0369",
+    "litsearch-0372",
+    "litsearch-0373",
+    "litsearch-0395",
+    "litsearch-0397",
+    "litsearch-0405",
+    "litsearch-0413",
+    "litsearch-0414",
+    "litsearch-0417",
+    "litsearch-0432",
+    "litsearch-0434",
+    "litsearch-0438",
+    "litsearch-0444",
+    "litsearch-0455",
+    "litsearch-0461",
+    "litsearch-0476",
+    "litsearch-0479",
+    "litsearch-0480",
+    "litsearch-0481",
+    "litsearch-0488",
+    "litsearch-0491",
+    "litsearch-0514",
+    "litsearch-0515",
+    "litsearch-0520",
+    "litsearch-0523",
+    "litsearch-0524",
+    "litsearch-0533",
+    "litsearch-0535",
+    "litsearch-0541",
+    "litsearch-0542",
+    "litsearch-0550",
+    "litsearch-0556",
+    "litsearch-0565",
+    "litsearch-0568",
+    "litsearch-0569",
+    "litsearch-0572"
+  ],
+  "strata": [
+    {
+      "query_set": "inline_acl",
+      "specificity": 0,
+      "quality": 1,
+      "population_count": 6,
+      "sample_count": 2
+    },
+    {
+      "query_set": "inline_acl",
+      "specificity": 0,
+      "quality": 2,
+      "population_count": 1,
+      "sample_count": 1
+    },
+    {
+      "query_set": "inline_acl",
+      "specificity": 1,
+      "quality": 2,
+      "population_count": 9,
+      "sample_count": 2
+    },
+    {
+      "query_set": "inline_nonacl",
+      "specificity": 0,
+      "quality": 1,
+      "population_count": 53,
+      "sample_count": 9
+    },
+    {
+      "query_set": "inline_nonacl",
+      "specificity": 0,
+      "quality": 2,
+      "population_count": 23,
+      "sample_count": 4
+    },
+    {
+      "query_set": "inline_nonacl",
+      "specificity": 1,
+      "quality": 1,
+      "population_count": 66,
+      "sample_count": 11
+    },
+    {
+      "query_set": "inline_nonacl",
+      "specificity": 1,
+      "quality": 2,
+      "population_count": 79,
+      "sample_count": 13
+    },
+    {
+      "query_set": "manual_acl",
+      "specificity": 0,
+      "quality": 1,
+      "population_count": 16,
+      "sample_count": 3
+    },
+    {
+      "query_set": "manual_acl",
+      "specificity": 0,
+      "quality": 2,
+      "population_count": 5,
+      "sample_count": 1
+    },
+    {
+      "query_set": "manual_acl",
+      "specificity": 1,
+      "quality": 1,
+      "population_count": 55,
+      "sample_count": 9
+    },
+    {
+      "query_set": "manual_acl",
+      "specificity": 1,
+      "quality": 2,
+      "population_count": 59,
+      "sample_count": 10
+    },
+    {
+      "query_set": "manual_iclr",
+      "specificity": 0,
+      "quality": 1,
+      "population_count": 6,
+      "sample_count": 2
+    },
+    {
+      "query_set": "manual_iclr",
+      "specificity": 0,
+      "quality": 2,
+      "population_count": 1,
+      "sample_count": 1
+    },
+    {
+      "query_set": "manual_iclr",
+      "specificity": 1,
+      "quality": 1,
+      "population_count": 39,
+      "sample_count": 7
+    },
+    {
+      "query_set": "manual_iclr",
+      "specificity": 1,
+      "quality": 2,
+      "population_count": 31,
+      "sample_count": 5
+    }
+  ],
+  "excluded_case_count": 148,
+  "excluded_case_ids_sha256": "028aa9b1afbb89cb95da6f61f16c47d8f4ea81fe39934b7822bb73150dbaead6",
+  "empty_strata_after_exclusion": [
+    {
+      "query_set": "inline_acl",
+      "specificity": 1,
+      "quality": 1,
+      "original_population_count": 5,
+      "excluded_count": 5
+    }
+  ]
+}

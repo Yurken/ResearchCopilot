@@ -6,6 +6,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ArxivRankingMode,
+  PaperSearchDepth,
   ArxivSearchRequest,
   ArxivSearchResponse,
   Artifact,
@@ -404,9 +405,10 @@ export const paperSearchApi = {
     request: ArxivSearchRequest,
     cutoffDate: string,
     limit = 5,
-    ranking_mode: ArxivRankingMode = "relevance"
+    ranking_mode: ArxivRankingMode = "relevance",
+    search_depth: PaperSearchDepth = "balanced",
   ): Promise<ArxivSearchResponse> =>
-    invoke("paper_search", { request, cutoffDate, limit, rankingMode: ranking_mode }),
+    invoke("paper_search", { request, cutoffDate, limit, rankingMode: ranking_mode, searchDepth: search_depth }),
   saveHistory: (draft_json: string, result_json: string): Promise<PaperSearchHistoryEntry> =>
     invoke("paper_search_save_history", { request: { draft_json, result_json } }),
   getHistory: (limit = 20): Promise<PaperSearchHistoryEntry[]> =>

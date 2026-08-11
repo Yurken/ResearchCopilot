@@ -1439,10 +1439,7 @@ pub async fn papers_analyze(
                 "paper_analysis_api_key",
                 "multi_agent_paper_analyst_api_key",
             ],
-            &[
-                "paper_analysis_model",
-                "multi_agent_paper_analyst_model",
-            ],
+            &["paper_analysis_model", "multi_agent_paper_analyst_model"],
         ) {
             Ok((c, s)) => (c, s),
             Err(e) => {
@@ -1644,7 +1641,8 @@ pub async fn papers_analyze(
             "paper:status",
             json!({ "paper_id": pid, "status": "analyzing", "step": "证据与结果分析中（3/4）…" }),
         );
-        let experiment_prompt_text = format!("{type_directive}{all_figure_context}{experiment_text}");
+        let experiment_prompt_text =
+            format!("{type_directive}{all_figure_context}{experiment_text}");
         let prompt3 = build_agent3_prompt(&core_method, &experiment_prompt_text);
         let msgs3 = vec![
             LlmMessage::system(agent3_system()),
@@ -1696,7 +1694,8 @@ pub async fn papers_analyze(
             json!({ "paper_id": pid, "status": "analyzing", "step": "综合评审中（4/4）…" }),
         );
         let experiment_summary = format!("{}\n\n{}", experiment_design, experiment_results);
-        let problem_summary_for_review = format!("{type_directive}{all_figure_context}{research_question}");
+        let problem_summary_for_review =
+            format!("{type_directive}{all_figure_context}{research_question}");
         let prompt4 = build_agent4_prompt(
             &problem_summary_for_review,
             &core_method,
@@ -1864,10 +1863,7 @@ pub async fn papers_reproduce(
                 "paper_reproduction_api_key",
                 "multi_agent_reproduction_api_key",
             ],
-            &[
-                "paper_reproduction_model",
-                "multi_agent_reproduction_model",
-            ],
+            &["paper_reproduction_model", "multi_agent_reproduction_model"],
         ) {
             Ok((c, s)) => (c, s),
             Err(e) => {

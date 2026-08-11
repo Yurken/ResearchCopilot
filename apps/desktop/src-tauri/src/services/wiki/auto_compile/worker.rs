@@ -127,7 +127,8 @@ async fn process_pending_compile(state: &AppState, pending: PendingCompile) {
             );
             let queue_result = if is_database_locked(&error) {
                 // 数据库锁冲突通常是瞬时的，用短延迟快速重试，避免 attempt 指数退避。
-                enqueue_short_retry(&state.db,
+                enqueue_short_retry(
+                    &state.db,
                     &pending.interest_id,
                     pending.attempt_count,
                     &error.to_string(),

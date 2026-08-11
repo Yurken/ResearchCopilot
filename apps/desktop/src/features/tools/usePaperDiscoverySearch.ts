@@ -3,24 +3,24 @@ import type {
   ArxivRankingMode,
   ArxivSearchRequest,
   ArxivSearchResponse,
+  PaperSearchDepth,
   WebSearchOutcome,
 } from "@research-copilot/types";
 import {
   DOMAIN_VENUES,
   RANK_OPTIONS,
   buildAppliedFilterEntries,
-  buildWebSupplementQuery,
   computeStaticVenues,
   formatDateInput,
   getDefaultCutoffDate,
   hasPaperDiscoveryCriteria,
-  mergeWebSearchOutcomes,
   splitStructuredInput,
   type RankKey,
 } from "./shared";
-import { apiClient, formatErrorMessage, journalApi, paperSearchApi } from "../../lib/client";
+import { formatErrorMessage, journalApi, paperSearchApi } from "../../lib/client";
 import type { PaperSearchHistoryEntry } from "../../lib/client";
 import { usePersistentState } from "../../hooks/usePersistentStringState";
+import { executePaperDiscoverySearch } from "./paperDiscoverySearchService";
 
 const PAPER_DISCOVERY_SESSION_KEY = "rc:tools:paper-discovery:v1";
 
@@ -38,6 +38,7 @@ interface PaperDiscoveryDraft {
   cutoffDate: string;
   limit: string;
   mode: ArxivRankingMode;
+  searchDepth: PaperSearchDepth;
 }
 
 interface PaperDiscoverySession {
@@ -60,6 +61,7 @@ function createPaperDiscoverySession(): PaperDiscoverySession {
       cutoffDate: getDefaultCutoffDate(),
       limit: "6",
       mode: "relevance",
+      searchDepth: "balanced",
     },
   };
 }
@@ -83,6 +85,7 @@ export function usePaperDiscoverySearch() {
     cutoffDate,
     limit,
     mode,
+    searchDepth = "balanced",
   } = session.draft;
   const [venueFilterLoading, setVenueFilterLoading] = useState(false);
   const [dynamicJournalTerms, setDynamicJournalTerms] = useState<string[]>([]);
@@ -202,8 +205,6 @@ export function usePaperDiscoverySearch() {
     lastSearchAt.current = now;
 
     const parsedLimit = Number(limit);
-    const fallbackWebQuery = buildWebSupplementQuery(request);
-
     try {
       setLoading(true);
       setError("");
@@ -211,36 +212,22 @@ export function usePaperDiscoverySearch() {
       setSearched(true);
       setResult(null);
       setWebSupplement(null);
-      const paperSearch = await apiClient.paperSearch.search(
+      const outcome = await executePaperDiscoverySearch({
         request,
         cutoffDate,
-        Number.isFinite(parsedLimit) ? parsedLimit : 6,
+        limit: Number.isFinite(parsedLimit) ? parsedLimit : 6,
         mode,
-      );
-      const webQueries = (paperSearch.search_queries?.length
-        ? paperSearch.search_queries
-        : [fallbackWebQuery]
-      ).slice(0, 4);
-      const webSearches = await Promise.allSettled(
-        webQueries.map((query) => apiClient.webSearch.query(query, cutoffDate)),
-      );
-      const nextWebSupplement = mergeWebSearchOutcomes(
-        webSearches.flatMap((search) => search.status === "fulfilled" ? [search.value] : []),
-      );
-      const failedWebSearches = webSearches.filter((search) => search.status === "rejected");
-      if (failedWebSearches.length > 0) {
-        setWebSupplementError(
-          `网络补充有 ${failedWebSearches.length}/${webSearches.length} 条查询未完成，已保留其余结果。`,
-        );
-      }
-      setResult(paperSearch);
-      setWebSupplement(nextWebSupplement);
+        searchDepth,
+      });
+      setResult(outcome.result);
+      setWebSupplement(outcome.webSupplement);
+      setWebSupplementError(outcome.webSupplementError);
 
       try {
-        const draftJson = JSON.stringify(session.draft);
+        const draftJson = JSON.stringify({ ...session.draft, searchDepth });
         const resultJson = JSON.stringify({
-          ...paperSearch,
-          web_supplement: nextWebSupplement,
+          ...outcome.result,
+          web_supplement: outcome.webSupplement,
         });
         await paperSearchApi.saveHistory(draftJson, resultJson);
         await loadHistory();
@@ -309,6 +296,7 @@ export function usePaperDiscoverySearch() {
       cutoffDateMax: formatDateInput(new Date()),
       limit,
       mode,
+      searchDepth,
       loading,
       error,
       canSearch,
@@ -325,6 +313,7 @@ export function usePaperDiscoverySearch() {
       onCutoffDateChange: (value: string) => updateDraft("cutoffDate", value),
       onLimitChange: (value: string) => updateDraft("limit", value),
       onModeChange: (value: ArxivRankingMode) => updateDraft("mode", value),
+      onSearchDepthChange: (value: PaperSearchDepth) => updateDraft("searchDepth", value),
       onSubmit: submit,
       history,
       historyLoading,

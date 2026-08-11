@@ -4,6 +4,9 @@ import type { ArxivRecommendation, ArxivSearchResponse, WebSearchOutcome } from 
 import ExternalLink from "../../components/ExternalLink";
 import { formatDate, scoreVariant } from "./shared";
 import { WebSupplementResults } from "./WebSupplementResults";
+import { PaperSearchRelationGraph } from "./PaperSearchRelationGraph";
+import { PaperSearchStrategySummary } from "./PaperSearchStrategySummary";
+import { paperDiscoverySourceLabel } from "./paperSearchPresentation";
 
 interface AppliedFilterEntry {
   label: string;
@@ -27,6 +30,7 @@ function PaperResultCard({
 }: PaperResultCardProps) {
   const hasAbstract = paper.abstract_text && paper.abstract_text.trim().length > 0;
   const hasTldr = paper.tldr_zh && paper.tldr_zh.trim().length > 0;
+  const discoverySourceLabel = paperDiscoverySourceLabel(paper.discovered_via);
 
   return (
     <Card padding="md" className="group space-y-3">
@@ -34,7 +38,16 @@ function PaperResultCard({
         <div className="min-w-0 flex-1 space-y-1.5">
           <div className="flex flex-wrap items-center gap-1.5">
             <Badge variant={scoreVariant(paper.score)}>{`${paper.score} 分`}</Badge>
+            {paper.relevance_band ? (
+              <Badge variant={paper.relevance_band === "high" ? "success" : "info"}>
+                {paper.relevance_band === "high" ? "高度相关" : "部分相关"}
+              </Badge>
+            ) : null}
             {paper.category ? <Badge variant="default">{paper.category}</Badge> : null}
+            {typeof paper.citation_count === "number" ? (
+              <Badge variant="default">{`引用 ${paper.citation_count}`}</Badge>
+            ) : null}
+            {discoverySourceLabel ? <Badge variant="info">{discoverySourceLabel}</Badge> : null}
             {paper.published_at ? (
               <Badge variant="default">{formatDate(paper.published_at)}</Badge>
             ) : null}
@@ -74,6 +87,12 @@ function PaperResultCard({
           <p className="text-xs font-semibold text-ink-secondary">推荐理由</p>
           <p className="text-sm leading-6 text-ink-secondary">{paper.reason}</p>
         </div>
+      ) : null}
+
+      {paper.matched_queries?.length ? (
+        <p className="text-[11px] leading-5 text-ink-tertiary">
+          {`命中检索路径：${paper.matched_queries.join(" · ")}`}
+        </p>
       ) : null}
 
       {hasAbstract ? (
@@ -199,6 +218,8 @@ export function ArxivSearchResults({
           ) : null}
         </Card>
 
+        <PaperSearchStrategySummary result={result} />
+
         {result.papers.length > 0 ? (
           <div className="space-y-3">
             {result.papers.map((paper, index) => (
@@ -221,6 +242,8 @@ export function ArxivSearchResults({
             </div>
           </Card>
         )}
+
+        <PaperSearchRelationGraph papers={result.papers} relations={result.relations} />
 
         <WebSupplementResults
           outcome={webSupplement}

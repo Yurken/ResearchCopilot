@@ -311,6 +311,57 @@ export interface AppUpdateInfo {
 
 export type ArxivRankingMode = "relevance" | "quality";
 
+export type PaperSearchDepth = "quick" | "balanced" | "deep";
+export type PaperRelevanceBand = "high" | "partial";
+export type PaperDiscoverySource =
+  | "search"
+  | "citation"
+  | "reference"
+  | "full_text_snippet"
+  | "search+full_text_snippet";
+
+export interface PaperSearchIntent {
+  summary: string;
+  concepts: string[];
+  methods: string[];
+  datasets: string[];
+  domains: string[];
+  venues: string[];
+  time_constraints: string[];
+}
+
+export interface PaperSearchStep {
+  stage:
+    | "query_plan"
+    | "academic_search"
+    | "full_text_search"
+    | "quality_filter"
+    | "citation_expand"
+    | "rerank";
+  label: string;
+  status: "completed" | "partial" | "skipped";
+  query?: string;
+  candidate_count?: number;
+  duration_ms: number;
+  note: string;
+}
+
+export interface PaperSearchMetrics {
+  academic_api_calls: number;
+  web_api_calls: number;
+  llm_calls: number;
+  estimated_tokens: number;
+  duration_ms: number;
+  iterations: number;
+  filtered_count: number;
+}
+
+export interface PaperSearchRelation {
+  source_id: string;
+  target_id: string;
+  kind: "cites" | "cited_by";
+}
+
 export interface ArxivSearchRequest {
   topic?: string;
   all_terms?: string[];
@@ -325,6 +376,7 @@ export interface ArxivSearchRequest {
 
 export interface ArxivRecommendation {
   arxiv_id: string;
+  corpus_id?: number;
   title: string;
   title_zh?: string;
   authors: string;
@@ -338,6 +390,10 @@ export interface ArxivRecommendation {
   reason: string;
   tldr_zh?: string;
   tags: string[];
+  citation_count?: number;
+  relevance_band?: PaperRelevanceBand;
+  matched_queries?: string[];
+  discovered_via?: PaperDiscoverySource;
 }
 
 export interface ArxivSearchResponse {
@@ -348,6 +404,11 @@ export interface ArxivSearchResponse {
   search_queries?: string[];
   query_plan_llm_used?: boolean;
   query_plan_note?: string;
+  search_intent?: PaperSearchIntent;
+  search_depth?: PaperSearchDepth;
+  strategy_trace?: PaperSearchStep[];
+  metrics?: PaperSearchMetrics;
+  relations?: PaperSearchRelation[];
   days?: number;
   cutoff_date?: string;
   limit: number;

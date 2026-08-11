@@ -294,8 +294,9 @@ pub struct AppState {
     /// Active code assistant stream handles keyed by request_id.
     pub code_handles: Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>,
     /// Pending code tool permission senders keyed by permission_id.
-    pub code_permissions:
-        Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<crate::code::CodePermissionDecision>>>>,
+    pub code_permissions: Arc<
+        Mutex<HashMap<String, tokio::sync::oneshot::Sender<crate::code::CodePermissionDecision>>>,
+    >,
     /// 串行化 WebDAV 同步：保证同一时刻只有一次同步在运行。
     pub sync_lock: Arc<Mutex<()>>,
     /// 同步状态，供前端订阅展示。

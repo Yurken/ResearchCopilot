@@ -5,7 +5,9 @@ use std::{
 
 use tokio::sync::Mutex;
 
-const SEMANTIC_SCHOLAR_MIN_INTERVAL: Duration = Duration::from_secs(1);
+// 无 Key 的公开额度按 1 req/s 计；留出 250ms 抖动余量，避免连续评测时在
+// 服务端窗口边界触发 429。带 Key 的调用仍共享这个保守节流器。
+const SEMANTIC_SCHOLAR_MIN_INTERVAL: Duration = Duration::from_millis(1_250);
 
 static SEMANTIC_SCHOLAR_RATE_LIMITER: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
 

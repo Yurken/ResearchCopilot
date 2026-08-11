@@ -2,7 +2,7 @@ import type { KeyboardEvent } from "react";
 import { AlertCircle, Clock, FileSearch, Globe2, Loader2, Trash2 } from "lucide-react";
 import type { PaperSearchHistoryEntry } from "../../lib/client";
 import { Button, Card, DatePicker, Input, Textarea } from "@research-copilot/ui";
-import type { ArxivRankingMode } from "@research-copilot/types";
+import type { ArxivRankingMode, PaperSearchDepth } from "@research-copilot/types";
 import {
   ARXIV_MODE_OPTIONS,
   CS_GROUPS,
@@ -13,6 +13,7 @@ import {
   type RankKey,
 } from "./shared";
 import { PaperDiscoveryCollapsibleSection } from "./PaperDiscoveryCollapsibleSection";
+import { PaperSearchDepthControl } from "./PaperSearchDepthControl";
 
 const insetShadow = "var(--rc-inset-shadow)";
 const raisedShadow = "var(--rc-raised-shadow)";
@@ -34,6 +35,7 @@ interface PaperDiscoveryPanelProps {
   cutoffDateMax: string;
   limit: string;
   mode: ArxivRankingMode;
+  searchDepth: PaperSearchDepth;
   loading: boolean;
   error: string;
   canSearch: boolean;
@@ -54,6 +56,7 @@ interface PaperDiscoveryPanelProps {
   onCutoffDateChange: (value: string) => void;
   onLimitChange: (value: string) => void;
   onModeChange: (value: ArxivRankingMode) => void;
+  onSearchDepthChange: (value: PaperSearchDepth) => void;
   onSubmit: () => void | Promise<void>;
 }
 
@@ -74,6 +77,7 @@ export function PaperDiscoveryPanel({
   cutoffDateMax,
   limit,
   mode,
+  searchDepth,
   loading,
   error,
   canSearch,
@@ -94,6 +98,7 @@ export function PaperDiscoveryPanel({
   onCutoffDateChange,
   onLimitChange,
   onModeChange,
+  onSearchDepthChange,
   onSubmit,
 }: PaperDiscoveryPanelProps) {
   const currentMode = ARXIV_MODE_OPTIONS.find((item) => item.value === mode) ?? ARXIV_MODE_OPTIONS[0];
@@ -459,8 +464,10 @@ export function PaperDiscoveryPanel({
         ) : null}
       </PaperDiscoveryCollapsibleSection>
 
+      <PaperSearchDepthControl value={searchDepth} onChange={onSearchDepthChange} />
+
       <p className="text-xs leading-5 text-ink-tertiary">
-        学术数据源会查找发布于截止日期及以前的论文；同次检索还会补充相关网络来源。
+        学术数据源会查找发布于截止日期及以前的论文；平衡模式补充正文片段，深度模式再从高价值种子探索引文网络，同次检索还会补充相关网络来源。
       </p>
 
       <div className="grid gap-3 md:grid-cols-3">

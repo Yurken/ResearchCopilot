@@ -232,6 +232,8 @@ slide-outline.md
 outputs/*.html
 outputs/*.md
 tmp/
+data/evaluations/
+docs/evolution-runs/*.json
 *.pem
 *.key
 *.p12

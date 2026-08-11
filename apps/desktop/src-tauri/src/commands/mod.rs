@@ -32,7 +32,16 @@ pub mod paper_figure_pages;
 pub mod paper_figures;
 pub mod paper_notes;
 pub mod paper_search;
+#[cfg(test)]
+mod paper_search_live_eval;
 mod paper_search_plan;
+#[cfg(test)]
+mod paper_search_plan_eval;
+mod paper_search_query_expansion;
+mod paper_search_ranking;
+mod paper_search_response_cache;
+mod paper_search_snippets;
+mod paper_search_strategy;
 pub mod paper_text;
 pub mod papers;
 pub mod research_context;

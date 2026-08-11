@@ -874,10 +874,7 @@ pub async fn submission_ai_review(
             "paper_analysis_api_key",
             "multi_agent_paper_analyst_api_key",
         ],
-        &[
-            "paper_analysis_model",
-            "multi_agent_paper_analyst_model",
-        ],
+        &["paper_analysis_model", "multi_agent_paper_analyst_model"],
     )
     .map_err(|e| e.to_string())?;
     let model = if is_scoped {
@@ -995,10 +992,7 @@ pub async fn submission_polish_abstract(
             "paper_analysis_api_key",
             "multi_agent_paper_analyst_api_key",
         ],
-        &[
-            "paper_analysis_model",
-            "multi_agent_paper_analyst_model",
-        ],
+        &["paper_analysis_model", "multi_agent_paper_analyst_model"],
     )
     .map_err(|e| e.to_string())?;
     let model = if is_scoped {
@@ -1070,10 +1064,7 @@ pub async fn submission_generate_cover_letter(
             "paper_analysis_api_key",
             "multi_agent_paper_analyst_api_key",
         ],
-        &[
-            "paper_analysis_model",
-            "multi_agent_paper_analyst_model",
-        ],
+        &["paper_analysis_model", "multi_agent_paper_analyst_model"],
     )
     .map_err(|e| e.to_string())?;
     let model = if is_scoped {
