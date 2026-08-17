@@ -19,6 +19,7 @@ mod db;
 mod dsh;
 mod dsh_api_config;
 mod dsh_process;
+mod dsh_usage;
 mod graph_rag;
 mod journal_partitions;
 mod links;

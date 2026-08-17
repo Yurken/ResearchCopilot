@@ -458,10 +458,11 @@ pub async fn dsh_runtime_start(
 #[tauri::command]
 pub async fn dsh_runtime_stop(
     app: AppHandle,
-    state: State<'_, DshRuntimeState>,
+    runtime_state: State<'_, DshRuntimeState>,
+    app_state: State<'_, AppState>,
 ) -> Result<DshRuntimeSnapshot, String> {
-    {
-        let mut inner = state.inner.lock().await;
+    let data_home = {
+        let mut inner = runtime_state.inner.lock().await;
         inner.generation = inner.generation.wrapping_add(1);
         inner.phase = DshPhase::Stopped;
         inner.url = None;
@@ -469,9 +470,11 @@ pub async fn dsh_runtime_stop(
         if let Some(child) = inner.child.take() {
             stop_child(child).await?;
         }
-    }
+        runtime_state.data_home(&inner.config)
+    };
+    crate::dsh_usage::collect_usage(&data_home, &app_state.db).await;
     append_diagnostic_log("dsh: runtime stopped");
-    Ok(snapshot(&app, state.inner()).await)
+    Ok(snapshot(&app, runtime_state.inner()).await)
 }
 
 #[tauri::command]

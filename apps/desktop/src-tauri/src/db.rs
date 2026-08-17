@@ -460,6 +460,14 @@ CREATE TABLE IF NOT EXISTS token_usage_daily (
     output_chars   INTEGER NOT NULL DEFAULT 0,
     request_count  INTEGER NOT NULL DEFAULT 0
 );
+
+-- 已汇总到 token_usage_daily 的 DSH session 事件水位，防止重复统计。
+CREATE TABLE IF NOT EXISTS dsh_usage_recorded (
+    session_file_path  TEXT PRIMARY KEY,
+    max_seq            INTEGER NOT NULL DEFAULT 0,
+    last_modified_at   INTEGER NOT NULL DEFAULT 0,
+    recorded_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
 ";
 
 // ── WebDAV 无冲突同步所需的本地元数据 ─────────────────────────────
