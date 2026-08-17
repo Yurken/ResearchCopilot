@@ -11,7 +11,7 @@ use std::time::Duration;
 
 const SNIPPET_SEARCH_URL: &str = "https://api.semanticscholar.org/graph/v1/snippet/search";
 const PAPER_BATCH_URL: &str = "https://api.semanticscholar.org/graph/v1/paper/batch";
-const USER_AGENT: &str = "xiaoyan-desktop/0.5.2";
+const USER_AGENT: &str = "xiaoyan-desktop/0.5.3";
 const PAPER_FIELDS: &str =
     "paperId,corpusId,title,abstract,year,venue,url,citationCount,publicationDate,authors,openAccessPdf";
 

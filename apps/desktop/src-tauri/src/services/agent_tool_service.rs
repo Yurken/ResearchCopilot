@@ -10,7 +10,6 @@ pub enum AgentTool {
     GraphRagSearch,
     MemoryRecall,
     SubmissionDiagnosis,
-    ExperimentEvidence,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -53,11 +52,6 @@ impl AgentTool {
                 title: "投稿诊断",
                 description: "围绕论文版本、目标刊会和审稿风险生成投稿前诊断。",
             },
-            Self::ExperimentEvidence => AgentToolDescriptor {
-                name: "experiment_evidence",
-                title: "实验证据查询",
-                description: "查询实验记录、复现进展和版本证据链。",
-            },
         }
     }
 }
@@ -75,16 +69,11 @@ pub fn tools_for_agent(agent_name: &str) -> &'static [AgentTool] {
             AgentTool::PaperLibrarySearch,
             AgentTool::GraphRagSearch,
         ],
-        "paper_analyst" | "reproduction" => &[
-            AgentTool::PaperFullText,
-            AgentTool::GraphRagSearch,
-            AgentTool::ExperimentEvidence,
-        ],
+        "paper_analyst" | "reproduction" => &[AgentTool::PaperFullText, AgentTool::GraphRagSearch],
         "synthesis" => &[
             AgentTool::ResearchContext,
             AgentTool::MemoryRecall,
             AgentTool::SubmissionDiagnosis,
-            AgentTool::ExperimentEvidence,
         ],
         _ => &[],
     }
@@ -119,7 +108,6 @@ pub fn collect_tool_descriptors(
         AgentTool::GraphRagSearch,
         AgentTool::MemoryRecall,
         AgentTool::SubmissionDiagnosis,
-        AgentTool::ExperimentEvidence,
     ];
 
     order

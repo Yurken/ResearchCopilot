@@ -62,7 +62,7 @@ def fetch_batch(corpus_ids: list[int], api_key: str) -> list[dict | None]:
     body = json.dumps({"ids": [f"CorpusId:{value}" for value in corpus_ids]}).encode()
     headers = {
         "Content-Type": "application/json",
-        "User-Agent": "xiaoyan-paper-search-eval/0.5.2",
+        "User-Agent": "xiaoyan-paper-search-eval/0.5.3",
     }
     if api_key:
         headers["x-api-key"] = api_key

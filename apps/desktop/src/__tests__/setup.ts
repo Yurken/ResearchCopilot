@@ -31,7 +31,13 @@ vi.mock("@tauri-apps/api/window", () => ({
     listen: vi.fn().mockResolvedValue(() => {}),
     onCloseRequested: vi.fn().mockResolvedValue(() => {}),
     onResized: vi.fn().mockResolvedValue(() => {}),
+    onMoved: vi.fn().mockResolvedValue(() => {}),
+    onScaleChanged: vi.fn().mockResolvedValue(() => {}),
+    innerPosition: vi.fn().mockResolvedValue({ x: 0, y: 0 }),
+    innerSize: vi.fn().mockResolvedValue({ width: 1440, height: 900 }),
+    scaleFactor: vi.fn().mockResolvedValue(1),
   })),
+  cursorPosition: vi.fn().mockResolvedValue({ x: 0, y: 0 }),
   LogicalSize: vi.fn(),
   LogicalPosition: vi.fn(),
 }));

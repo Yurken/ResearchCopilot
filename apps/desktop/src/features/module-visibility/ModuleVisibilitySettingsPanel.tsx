@@ -16,7 +16,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Badge, Button, Card } from "@research-copilot/ui";
-import { EXPERIMENT_MODULES, TOOL_MODULES, type ModuleGroupKey } from "./shared";
+import { TOOL_MODULES, type ModuleGroupKey } from "./shared";
 import { useModuleVisibility } from "./useModuleVisibility";
 
 const MODULE_ICONS: Record<string, LucideIcon> = {
@@ -125,14 +125,6 @@ export default function ModuleVisibilitySettingsPanel() {
         </Button>
       </div>
 
-      <ModuleGroup
-        group="experiment"
-        title="实验页签"
-        description="按研究方式保留代码、快照或记录入口。"
-        modules={EXPERIMENT_MODULES}
-        values={config.experiment}
-        onToggle={(group, key) => toggle(group, key as never)}
-      />
       <ModuleGroup
         group="tools"
         title="实用工具页签"

@@ -10,7 +10,6 @@ import {
   type RevisionTaskStatus,
   type Submission,
   type SubmissionDiagnosisReport,
-  type SubmissionExperimentOption,
   type SubmissionRevisionTask,
 } from "./shared";
 
@@ -27,7 +26,6 @@ interface ChecklistWorkspaceProps {
   importingDiagnosisReportId: string | null;
   revisionTasks: SubmissionRevisionTask[];
   revisionVersions: PaperVersion[];
-  revisionExperiments: SubmissionExperimentOption[];
   revisionLoading: boolean;
   importingRevisionTaskReportId: string | null;
   updatingRevisionTaskId: string | null;
@@ -41,7 +39,7 @@ interface ChecklistWorkspaceProps {
   onImportDiagnosisTasks: (reportId: string) => void | Promise<void>;
   onUpdateRevisionTask: (
     taskId: string,
-    patch: Partial<{ status: RevisionTaskStatus; paperVersionId: string; experimentId: string }>,
+    patch: Partial<{ status: RevisionTaskStatus; paperVersionId: string }>,
   ) => void | Promise<void>;
 }
 
@@ -58,7 +56,6 @@ export default function ChecklistWorkspace({
   importingDiagnosisReportId,
   revisionTasks,
   revisionVersions,
-  revisionExperiments,
   revisionLoading,
   importingRevisionTaskReportId,
   updatingRevisionTaskId,
@@ -160,7 +157,6 @@ export default function ChecklistWorkspace({
         <RevisionTaskPanel
           tasks={revisionTasks}
           versions={revisionVersions}
-          experiments={revisionExperiments}
           loading={revisionLoading}
           updatingTaskId={updatingRevisionTaskId}
           onUpdateTask={onUpdateRevisionTask}

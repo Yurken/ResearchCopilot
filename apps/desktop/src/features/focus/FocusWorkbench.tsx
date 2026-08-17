@@ -22,7 +22,7 @@ import Knowledge from "../../pages/Knowledge";
 import Copilot from "../../pages/Copilot";
 import Writing from "../../pages/Writing";
 import Tools from "../../pages/Tools";
-import Experiment from "../../pages/Experiment";
+import Code from "../../pages/Code";
 import Submission from "../../pages/Submission";
 import {
   BASE_INTEREST_TABS,
@@ -185,7 +185,7 @@ export default function FocusWorkbench() {
       case "chat":
         return <Copilot hideFolders />;
       case "experiment":
-        return <Experiment />;
+        return <Code />;
       case "submission":
         return <Submission />;
       case "tools":

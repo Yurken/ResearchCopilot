@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import {
   FileText,
   BookOpen,
-  FlaskConical,
   ScrollText,
   Search,
   Map,
@@ -14,11 +13,9 @@ import type { ChatToolResult } from "@research-copilot/types";
 
 const TOOL_LABELS: Record<string, string> = {
   create_note: "创建笔记",
-  create_experiment: "创建实验记录",
   generate_survey: "生成文献综述",
   search_knowledge: "搜索知识库",
   search_papers: "搜索论文库",
-  search_experiments: "搜索实验记录",
   generate_plan: "生成研究规划",
   search_arxiv: "arXiv 检索",
   query_journal: "期刊分区查询",
@@ -27,11 +24,9 @@ const TOOL_LABELS: Record<string, string> = {
 
 const TOOL_ICONS: Record<string, React.ComponentType<{ className?: string; style?: React.CSSProperties }>> = {
   create_note: BookOpen,
-  create_experiment: FlaskConical,
   generate_survey: ScrollText,
   search_knowledge: Search,
   search_papers: FileText,
-  search_experiments: Search,
   generate_plan: Map,
   search_arxiv: Globe,
   query_journal: BookOpen,
@@ -42,8 +37,6 @@ function getToolNavLink(toolName: string): string | null {
   switch (toolName) {
     case "create_note":
       return "/knowledge";
-    case "create_experiment":
-      return "/experiment";
     case "generate_survey":
       return "/survey";
     case "search_papers":

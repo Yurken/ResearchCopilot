@@ -3,7 +3,6 @@ import { Routes, Route, NavLink, Navigate, useLocation, useNavigate } from "reac
 import {
   BookOpen,
   FileText,
-  FlaskConical,
   LayoutDashboard,
   Library,
   Map,
@@ -14,6 +13,7 @@ import {
   Wrench,
 } from "lucide-react";
 import RouteErrorBoundary from "./components/RouteErrorBoundary";
+import DeepSeekIcon from "./features/deepseek-harness/DeepSeekIcon";
 
 const Home = lazy(() => import("./pages/Home"));
 const Planner = lazy(() => import("./pages/Planner"));
@@ -26,7 +26,7 @@ const Knowledge = lazy(() => import("./pages/Knowledge"));
 const Settings = lazy(() => import("./pages/Settings"));
 const Tools = lazy(() => import("./pages/Tools"));
 const Submission = lazy(() => import("./pages/Submission"));
-const Experiment = lazy(() => import("./pages/Experiment"));
+const Code = lazy(() => import("./pages/Code"));
 const Writing = lazy(() => import("./pages/Writing"));
 const ResearchTheme = lazy(() => import("./pages/ResearchTheme"));
 const FocusApp = lazy(() => import("./pages/FocusLayout"));
@@ -60,7 +60,7 @@ const navItems = [
   { to: "/papers", icon: FileText, label: "论文" },
   { to: "/writing", icon: PenLine, label: "写作" },
   { to: "/knowledge", icon: Library, label: "知识" },
-  { to: "/experiment", icon: FlaskConical, label: "实验" },
+  { to: "/code", icon: DeepSeekIcon, label: "DSH" },
   { to: "/submission", icon: Send, label: "投稿" },
   { to: "/tools", icon: Wrench, label: "工具" },
   { to: "/settings", icon: SettingsIcon, label: "设置" },
@@ -207,9 +207,9 @@ export default function App() {
             <Route path="/papers/:id/reader" element={<RouteErrorBoundary><PaperReader /></RouteErrorBoundary>} />
             <Route path="/writing" element={<RouteErrorBoundary><Writing /></RouteErrorBoundary>} />
             <Route path="/submission" element={<RouteErrorBoundary><Submission /></RouteErrorBoundary>} />
-            <Route path="/experiment" element={<RouteErrorBoundary><Experiment /></RouteErrorBoundary>} />
+            <Route path="/experiment" element={<Navigate to="/code" replace />} />
             <Route path="/tools" element={<RouteErrorBoundary><Tools /></RouteErrorBoundary>} />
-            <Route path="/code" element={<Navigate to="/experiment" replace />} />
+            <Route path="/code" element={<RouteErrorBoundary><Code /></RouteErrorBoundary>} />
             <Route path="/chat" element={<RouteErrorBoundary><Copilot /></RouteErrorBoundary>} />
             <Route path="/xiaoyan" element={<Navigate to="/chat" replace />} />
             <Route path="/copilot" element={<Navigate to="/chat" replace />} />

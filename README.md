@@ -25,7 +25,7 @@
   <a href="CHANGELOG.md">更新日志</a>
 </p>
 
-> 当前版本：**v0.5.2**。小妍仍处于快速迭代阶段，升级前建议备份重要数据。
+> 当前版本：**v0.5.3**。小妍仍处于快速迭代阶段，升级前建议备份重要数据。
 
 ## 为什么选择小妍
 
@@ -47,20 +47,19 @@
 | 文献与精读 | PDF 管理、全文提取、语义检索、图表识别、翻译与复现指南 |
 | 小妍协同 | 直接对话、任务拆解、技能模板、附件、来源引用与任务中止 |
 | 知识库 | Markdown 笔记、小妍内部自动 LLM Wiki、知识图谱、证据关系与混合 Graph RAG |
-| 实验与代码 | 结构化实验记录、代码工作区、Git 审查、快照与差异对比 |
+| DSH | 运行 DeepSeek 官方 Harness，支持内置锁定版本、外部版本和小妍 API 配置 |
 | 学术写作 | 多文件 LaTeX、预览、诊断、统计、润色、续写与学术翻译 |
 | 投稿管理 | 刊会追踪、投稿看板、版本快照、角色化预审与审稿意见跟踪 |
 | 数据与同步 | 本地数据库、加密配置导出、备份恢复及可选的加密同步 |
 
 <details>
-<summary><strong>查看 v0.5.2 主要更新</strong></summary>
+<summary><strong>查看 v0.5.3 主要更新</strong></summary>
 
-- 论文阅读器新增目录导航、文本批注和独立问答侧栏
-- 支持携带当前论文上下文继续研究
-- 论文检索支持自然语言意图拆分、快/均衡/深度预算；均衡模式用正文片段补充描述型查询，深度模式再探索引文网络，并展示相关性分层、检索步骤及单次 API/Token 成本
-- 论文列表复用缓存与快照，切换时加载更高效
-- 修复实验代码消息显示与工作目录持久化问题
-- 减少专利检索和文档格式比对误判
+- 代码工作区改为直接运行 DeepSeek 官方 Harness
+- 支持内置锁定版与本机外部 DSH，并可配置小妍 API
+- DSH 运行状态、重启和停止操作改为悬浮工具条
+- DSH 首发已覆盖稳定启停、状态同步和 iframe 内小妍视线跟随
+- 发布流水线按平台构建并校验 DSH 与 Node 运行时
 
 </details>
 
@@ -158,17 +157,11 @@ docs: 补充本地开发说明
 
 提交 PR 前至少运行与改动范围相符的检查；跨工作区修改需运行 `pnpm type-check` 和 `pnpm lint`。一般使用问题请查看 [获取帮助](SUPPORT.md)；安全漏洞请不要创建公开 Issue，按照 [安全政策](SECURITY.md) 私下报告。
 
-## Star History
+## 支持项目
 
 如果小妍对你有帮助，欢迎点一个 Star。它会帮助更多研究者发现项目。
 
-<a href="https://www.star-history.com/?type=date&repos=Yurken%2Fxiaoyan">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Yurken/xiaoyan&type=date&theme=dark&legend=top-left&sealed_token=x85YP6wH0H_fYrh94oYtmnIyStrNxFHtj61xHIGYKjPB8Qdy29vTA3irisqFtyM67s1VvYoRyVJGGdWcs3a9H6kF0tymBrZtooxNKTXn9c77rkdN9J9afD9XQEIX1FlPRgHer8BxtCYPPWQukbhLw-hkQuktrEUeEyqpe0g8FKDZbIGtsF80R7AXoRV8" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Yurken/xiaoyan&type=date&legend=top-left&sealed_token=x85YP6wH0H_fYrh94oYtmnIyStrNxFHtj61xHIGYKjPB8Qdy29vTA3irisqFtyM67s1VvYoRyVJGGdWcs3a9H6kF0tymBrZtooxNKTXn9c77rkdN9J9afD9XQEIX1FlPRgHer8BxtCYPPWQukbhLw-hkQuktrEUeEyqpe0g8FKDZbIGtsF80R7AXoRV8" />
-    <img alt="小妍 GitHub Star 历史曲线" src="https://api.star-history.com/chart?repos=Yurken/xiaoyan&type=date&legend=top-left&sealed_token=x85YP6wH0H_fYrh94oYtmnIyStrNxFHtj61xHIGYKjPB8Qdy29vTA3irisqFtyM67s1VvYoRyVJGGdWcs3a9H6kF0tymBrZtooxNKTXn9c77rkdN9J9afD9XQEIX1FlPRgHer8BxtCYPPWQukbhLw-hkQuktrEUeEyqpe0g8FKDZbIGtsF80R7AXoRV8" />
-  </picture>
-</a>
+[在 GitHub 上为小妍点 Star](https://github.com/Yurken/xiaoyan)
 
 ## 许可证
 

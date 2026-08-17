@@ -8,6 +8,7 @@ import {
   Send,
   Sparkles,
   Wrench,
+  SquareTerminal,
 } from "lucide-react";
 import type { InterestTab } from "../knowledge/ResearchWorkbench";
 
@@ -29,7 +30,7 @@ export const FREE_TABS: Array<{ key: FreeTab; label: string; icon: typeof Sparkl
   { key: "writing", label: "写作", icon: PenLine },
   { key: "knowledge", label: "知识", icon: Library },
   { key: "chat", label: "对话", icon: MessageSquare },
-  { key: "experiment", label: "实验", icon: Microscope },
+  { key: "experiment", label: "代码", icon: SquareTerminal },
   { key: "submission", label: "投稿", icon: Send },
   { key: "tools", label: "工具", icon: Wrench },
 ];
@@ -56,7 +57,7 @@ export const BASE_INTEREST_TABS: Array<{
   { key: "writing", label: "写作", icon: PenLine },
   { key: "chat", label: "对话", icon: MessageSquare },
   { key: "knowledge", label: "知识", icon: Library },
-  { key: "experiment", label: "实验", icon: Microscope },
+  { key: "experiment", label: "代码", icon: SquareTerminal },
   { key: "submission", label: "投稿", icon: Send },
   { key: "tools", label: "工具", icon: Wrench },
 ];
