@@ -47,7 +47,7 @@ base64 = "0.22"
 # Capture stderr for filtering noisy PDF extraction warnings
 gag = "1"
 # Encryption for settings export/import (AES-256-GCM + PBKDF2)
-aes-gcm = "0.10"
+aes-gcm = "0.11"
 pbkdf2 = "0.12"
 sha2 = "0.10"
 hmac = "0.12"
