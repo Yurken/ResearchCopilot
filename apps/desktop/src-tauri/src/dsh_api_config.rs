@@ -1,5 +1,6 @@
 use crate::llm::LlmClient;
 use serde::Serialize;
+use serde_json::Value as JsonValue;
 use serde_yaml::{Mapping, Value};
 use std::{
     collections::HashMap,
@@ -18,6 +19,7 @@ pub(crate) struct XiaoyanApiProfile {
     base_url: String,
     api_key: String,
     model: String,
+    pub models: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -88,6 +90,7 @@ pub(crate) fn resolve_xiaoyan_api(
         base_url: base_url.trim().trim_end_matches('/').to_string(),
         api_key: api_key.trim().to_string(),
         model: model.trim().to_string(),
+        models: vec![model.trim().to_string()],
     })
 }
 
@@ -98,6 +101,74 @@ fn normalize_anthropic_base_url(base_url: &str) -> String {
         .unwrap_or(trimmed)
         .trim_end_matches('/')
         .to_string()
+}
+
+/// 查询远端可用的模型列表。失败时回退到当前默认模型，避免阻塞 DSH 配置写入。
+pub(crate) async fn fetch_available_models(profile: &XiaoyanApiProfile) -> Vec<String> {
+    let url = match profile.protocol {
+        "openai-completions" => format!("{}/models", profile.base_url),
+        "anthropic-messages" => format!("{}/v1/models", profile.base_url),
+        _ => return vec![profile.model.clone()],
+    };
+
+    let client = reqwest::Client::new();
+    let request = match profile.protocol {
+        "openai-completions" => client.get(&url).bearer_auth(&profile.api_key),
+        "anthropic-messages" => client
+            .get(&url)
+            .header("x-api-key", &profile.api_key)
+            .header("anthropic-version", "2023-06-01"),
+        _ => return vec![profile.model.clone()],
+    };
+
+    match request.send().await {
+        Ok(response) if response.status().is_success() => {
+            match response.json::<JsonValue>().await {
+                Ok(json) => {
+                    let mut ids: Vec<String> = json
+                        .get("data")
+                        .and_then(JsonValue::as_array)
+                        .map(|items| {
+                            items
+                                .iter()
+                                .filter_map(|item| {
+                                    item.get("id").and_then(JsonValue::as_str).map(String::from)
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
+                    if ids.is_empty() {
+                        ids.push(profile.model.clone());
+                    } else {
+                        // 保持当前默认模型在首位，DSH 默认选中它
+                        ids.retain(|id| id != &profile.model);
+                        ids.insert(0, profile.model.clone());
+                    }
+                    return ids;
+                }
+                Err(error) => {
+                    crate::append_diagnostic_log(&format!(
+                        "[dsh_api_config] parse models response failed: {error}"
+                    ));
+                }
+            }
+        }
+        Ok(response) => {
+            crate::append_diagnostic_log(&format!(
+                "[dsh_api_config] fetch models returned {} for {}",
+                response.status(),
+                url
+            ));
+        }
+        Err(error) => {
+            crate::append_diagnostic_log(&format!(
+                "[dsh_api_config] fetch models failed: {error}"
+            ));
+        }
+    }
+
+    vec![profile.model.clone()]
 }
 
 pub(crate) fn write_dsh_api_configuration(
@@ -136,15 +207,16 @@ fn render_credentials(path: &Path, profile: &XiaoyanApiProfile) -> Result<String
 fn render_settings(path: &Path, profile: &XiaoyanApiProfile) -> Result<String, String> {
     let mut root = read_yaml_mapping(path, "DSH 模型配置")?;
 
-    let mut model = Mapping::new();
-    model.insert(
-        Value::String("id".to_string()),
-        Value::String(profile.model.clone()),
-    );
-    model.insert(
-        Value::String("name".to_string()),
-        Value::String(profile.model.clone()),
-    );
+    let models: Vec<Value> = profile
+        .models
+        .iter()
+        .map(|id| {
+            let mut model = Mapping::new();
+            model.insert(Value::String("id".to_string()), Value::String(id.clone()));
+            model.insert(Value::String("name".to_string()), Value::String(id.clone()));
+            Value::Mapping(model)
+        })
+        .collect();
 
     let mut route = Mapping::new();
     route.insert(
@@ -165,7 +237,7 @@ fn render_settings(path: &Path, profile: &XiaoyanApiProfile) -> Result<String, S
     );
     route.insert(
         Value::String("models".to_string()),
-        Value::Sequence(vec![Value::Mapping(model)]),
+        Value::Sequence(models),
     );
 
     let section_key = Value::String("llm-pi-ai".to_string());
@@ -349,6 +421,7 @@ mod tests {
             base_url: "https://gateway.example/v1".to_string(),
             api_key: "test-secret".to_string(),
             model: "research-model".to_string(),
+            models: vec!["research-model".to_string()],
         };
 
         let result = write_dsh_api_configuration(&directory, &profile)

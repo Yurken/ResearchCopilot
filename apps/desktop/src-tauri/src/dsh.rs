@@ -1,5 +1,7 @@
 use crate::append_diagnostic_log;
-use crate::dsh_api_config::{resolve_xiaoyan_api, write_dsh_api_configuration, DshApiImportResult};
+use crate::dsh_api_config::{
+    resolve_xiaoyan_api, write_dsh_api_configuration, DshApiImportResult, fetch_available_models,
+};
 use crate::dsh_process::{bundled_available, format_exit_error, launch_command, stop_child};
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
@@ -509,7 +511,9 @@ pub async fn dsh_runtime_import_xiaoyan_api(
 ) -> Result<DshApiImportResult, String> {
     let profile = {
         let settings = app_state.settings.read().await;
-        resolve_xiaoyan_api(&settings)?
+        let mut profile = resolve_xiaoyan_api(&settings)?;
+        profile.models = fetch_available_models(&profile).await;
+        profile
     };
     let result = {
         let mut inner = runtime_state.inner.lock().await;
