@@ -26,7 +26,7 @@ DSH_NODE_BINARY=/absolute/path/to/node pnpm dsh:prepare-runtime
 脚本使用固定的 pnpm 11.7.0，并从锁定 submodule 创建隔离的本地临时 clone，避免小妍 monorepo 的依赖参与上游模块解析。随后从该源码执行安装、构建和 `pnpm deploy`，递归物化 workspace 运行依赖并拒绝残留 symlink，最终生成：
 
 ```text
-apps/desktop/src-tauri/resources/dsh/runtime/
+apps/desktop/src-tauri/r/
 ├── node                         # Windows 为 node.exe
 ├── app/                         # DSH CLI 与生产依赖闭包
 ├── LICENSE.node
@@ -48,7 +48,7 @@ pnpm dsh:prepare-runtime:dev
 内置模式执行：
 
 ```text
-<resource>/dsh/runtime/node <resource>/dsh/runtime/app/lib/bin.js web --host 127.0.0.1 --port 0
+<resource>/r/node <resource>/r/a/lib/bin.js web --host 127.0.0.1 --port 0
 ```
 
 外部模式执行用户选择的 `dsh` 文件，并使用相同的 loopback 和随机端口参数。后端只接受 DSH 输出的 `http://127.0.0.1:<port>` URL，再交给页面 iframe。

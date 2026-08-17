@@ -19,15 +19,14 @@ fn bundled_paths(app: &AppHandle) -> Result<BundledDshPaths, String> {
         .resource_dir()
         .map_err(|error| format!("无法定位应用资源目录：{error}"))?
         .join("resources")
-        .join("dsh");
-    let runtime = root.join("runtime");
+        .join("r");
     let paths = BundledDshPaths {
         node: if cfg!(windows) {
-            runtime.join("node.exe")
+            root.join("node.exe")
         } else {
-            runtime.join("node")
+            root.join("node")
         },
-        entry: runtime.join("app").join("lib").join("bin.js"),
+        entry: root.join("a").join("lib").join("bin.js"),
     };
     if !paths.node.is_file() || !paths.entry.is_file() {
         return Err(

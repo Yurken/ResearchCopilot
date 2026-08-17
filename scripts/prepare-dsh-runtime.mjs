@@ -21,8 +21,8 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sourceRoot = join(root, "vendor", "deepseek-harness");
 const resourceRoot = join(root, "apps", "desktop", "src-tauri", "resources", "dsh");
-const runtimeRoot = join(resourceRoot, "runtime");
-const appRoot = join(runtimeRoot, "app");
+const runtimeRoot = join(root, "apps", "desktop", "src-tauri", "r");
+const appRoot = join(runtimeRoot, "a");
 const manifestPath = join(resourceRoot, "manifest.json");
 const args = new Set(process.argv.slice(2));
 
