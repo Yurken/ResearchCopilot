@@ -38,7 +38,8 @@ function run(command, commandArgs, options = {}) {
     stdio: quiet ? ["ignore", "pipe", "pipe"] : "inherit",
     encoding: quiet ? "utf8" : undefined,
     maxBuffer: quiet ? 64 * 1024 * 1024 : undefined,
-    shell: false,
+    // Node.js >=24 on Windows rejects spawning .cmd/.bat files without a shell.
+    shell: options.shell ?? false,
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {
@@ -65,11 +66,11 @@ function run(command, commandArgs, options = {}) {
 function pnpm(commandArgs, options = {}) {
   const explicit = process.env.DSH_PNPM?.trim();
   if (explicit) {
-    run(explicit, commandArgs, options);
+    run(explicit, commandArgs, { ...options, shell: process.platform === "win32" });
     return;
   }
   const npx = process.platform === "win32" ? "npx.cmd" : "npx";
-  run(npx, ["--yes", "pnpm@11.7.0", ...commandArgs], options);
+  run(npx, ["--yes", "pnpm@11.7.0", ...commandArgs], { ...options, shell: process.platform === "win32" });
 }
 
 function gitOutput(commandArgs) {
