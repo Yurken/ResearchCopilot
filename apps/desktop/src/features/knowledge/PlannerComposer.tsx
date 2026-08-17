@@ -17,6 +17,8 @@ import {
   parseTagInput,
   type PlannerSuggestionState,
 } from "./plannerSuggestions";
+import type { HypothesisPlanningDraft } from "./hypothesisPlanning";
+import HypothesisPlanningCard from "./HypothesisPlanningCard";
 
 interface PlannerComposerProps {
   onCancel?: () => void;
@@ -25,6 +27,7 @@ interface PlannerComposerProps {
     meta?: { uploadedReferences: number; failedUploads: string[] }
   ) => void;
   initialTopic?: string;
+  initialDraft?: HypothesisPlanningDraft;
 }
 
 interface PlannerFormState {
@@ -111,8 +114,16 @@ function mapAiSuggestion(response: ResearchInterestHintResponse): PlannerSuggest
   };
 }
 
-export default function PlannerComposer({ onCancel, onCreated, initialTopic }: PlannerComposerProps) {
-  const [form, setForm] = useState(() => initialTopic ? { ...INITIAL_STATE, topic: initialTopic } : INITIAL_STATE);
+export default function PlannerComposer({ onCancel, onCreated, initialTopic, initialDraft }: PlannerComposerProps) {
+  const [form, setForm] = useState(() => initialDraft ? {
+    ...INITIAL_STATE,
+    topic: initialDraft.topic,
+    keywordsRaw: initialDraft.keywords.join(", "),
+    goal: initialDraft.goal,
+    knownContext: initialDraft.knownContext,
+    preferredOutput: initialDraft.preferredOutput,
+  } : initialTopic ? { ...INITIAL_STATE, topic: initialTopic } : INITIAL_STATE);
+  const [hypothesisCard, setHypothesisCard] = useState(initialDraft?.hypothesisCard ?? null);
   const [saving, setSaving] = useState(false);
   const [submitPhase, setSubmitPhase] = useState<"idle" | "creating" | "uploading">("idle");
   const [error, setError] = useState("");
@@ -252,6 +263,14 @@ export default function PlannerComposer({ onCancel, onCreated, initialTopic }: P
       setError("请先填写研究主题。");
       return;
     }
+    if (hypothesisCard?.decision === "discarded") {
+      setError("该候选假设已标记为放弃。请改为采用或修正后再创建研究规划。");
+      return;
+    }
+    if (hypothesisCard?.decision === "draft") {
+      setError("请先明确采用、修改或放弃该候选假设，再创建研究规划。");
+      return;
+    }
 
     setSaving(true);
     setSubmitPhase("creating");
@@ -261,7 +280,8 @@ export default function PlannerComposer({ onCancel, onCreated, initialTopic }: P
       const interest = await apiClient.knowledge.createInterest(
         form.topic.trim(),
         keywords,
-        hasProfile ? profile : undefined
+        hasProfile ? profile : undefined,
+        hypothesisCard ?? undefined,
       );
       const failedUploads: string[] = [];
       let uploadedReferences = 0;
@@ -342,6 +362,9 @@ export default function PlannerComposer({ onCancel, onCreated, initialTopic }: P
 
   return (
     <Card padding="md" className="space-y-4">
+      {hypothesisCard ? (
+        <HypothesisPlanningCard card={hypothesisCard} onChange={setHypothesisCard} />
+      ) : null}
       <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
         <div>
           <p className="text-sm font-semibold text-ink-primary">研究画像输入</p>

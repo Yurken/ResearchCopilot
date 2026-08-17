@@ -1,0 +1,208 @@
+{
+  "suite": "LitSearch",
+  "selection": "stratified_without_replacement",
+  "stratification_fields": [
+    "query_set",
+    "specificity",
+    "quality"
+  ],
+  "seed": 20260809,
+  "sample_count": 80,
+  "dataset_sha256": "b66811bb32849987dbbf1d35a544b77a3cb3f8a21f7f73d947fb8fdad2f4f03f",
+  "case_ids": [
+    "litsearch-0002",
+    "litsearch-0008",
+    "litsearch-0014",
+    "litsearch-0015",
+    "litsearch-0022",
+    "litsearch-0023",
+    "litsearch-0025",
+    "litsearch-0039",
+    "litsearch-0042",
+    "litsearch-0055",
+    "litsearch-0064",
+    "litsearch-0074",
+    "litsearch-0086",
+    "litsearch-0090",
+    "litsearch-0102",
+    "litsearch-0110",
+    "litsearch-0111",
+    "litsearch-0118",
+    "litsearch-0120",
+    "litsearch-0121",
+    "litsearch-0124",
+    "litsearch-0131",
+    "litsearch-0142",
+    "litsearch-0143",
+    "litsearch-0156",
+    "litsearch-0174",
+    "litsearch-0175",
+    "litsearch-0178",
+    "litsearch-0179",
+    "litsearch-0186",
+    "litsearch-0200",
+    "litsearch-0201",
+    "litsearch-0212",
+    "litsearch-0215",
+    "litsearch-0224",
+    "litsearch-0238",
+    "litsearch-0239",
+    "litsearch-0248",
+    "litsearch-0257",
+    "litsearch-0280",
+    "litsearch-0301",
+    "litsearch-0314",
+    "litsearch-0318",
+    "litsearch-0322",
+    "litsearch-0339",
+    "litsearch-0346",
+    "litsearch-0360",
+    "litsearch-0366",
+    "litsearch-0367",
+    "litsearch-0368",
+    "litsearch-0385",
+    "litsearch-0390",
+    "litsearch-0391",
+    "litsearch-0399",
+    "litsearch-0409",
+    "litsearch-0410",
+    "litsearch-0418",
+    "litsearch-0419",
+    "litsearch-0431",
+    "litsearch-0441",
+    "litsearch-0449",
+    "litsearch-0453",
+    "litsearch-0467",
+    "litsearch-0470",
+    "litsearch-0475",
+    "litsearch-0483",
+    "litsearch-0508",
+    "litsearch-0528",
+    "litsearch-0534",
+    "litsearch-0537",
+    "litsearch-0538",
+    "litsearch-0539",
+    "litsearch-0552",
+    "litsearch-0553",
+    "litsearch-0557",
+    "litsearch-0559",
+    "litsearch-0563",
+    "litsearch-0577",
+    "litsearch-0593",
+    "litsearch-0595"
+  ],
+  "strata": [
+    {
+      "query_set": "inline_acl",
+      "specificity": 0,
+      "quality": 1,
+      "population_count": 18,
+      "sample_count": 3
+    },
+    {
+      "query_set": "inline_acl",
+      "specificity": 0,
+      "quality": 2,
+      "population_count": 14,
+      "sample_count": 2
+    },
+    {
+      "query_set": "inline_acl",
+      "specificity": 1,
+      "quality": 1,
+      "population_count": 5,
+      "sample_count": 1
+    },
+    {
+      "query_set": "inline_acl",
+      "specificity": 1,
+      "quality": 2,
+      "population_count": 61,
+      "sample_count": 8
+    },
+    {
+      "query_set": "inline_nonacl",
+      "specificity": 0,
+      "quality": 1,
+      "population_count": 61,
+      "sample_count": 8
+    },
+    {
+      "query_set": "inline_nonacl",
+      "specificity": 0,
+      "quality": 2,
+      "population_count": 27,
+      "sample_count": 4
+    },
+    {
+      "query_set": "inline_nonacl",
+      "specificity": 1,
+      "quality": 1,
+      "population_count": 75,
+      "sample_count": 9
+    },
+    {
+      "query_set": "inline_nonacl",
+      "specificity": 1,
+      "quality": 2,
+      "population_count": 90,
+      "sample_count": 11
+    },
+    {
+      "query_set": "manual_acl",
+      "specificity": 0,
+      "quality": 1,
+      "population_count": 19,
+      "sample_count": 3
+    },
+    {
+      "query_set": "manual_acl",
+      "specificity": 0,
+      "quality": 2,
+      "population_count": 6,
+      "sample_count": 1
+    },
+    {
+      "query_set": "manual_acl",
+      "specificity": 1,
+      "quality": 1,
+      "population_count": 63,
+      "sample_count": 8
+    },
+    {
+      "query_set": "manual_acl",
+      "specificity": 1,
+      "quality": 2,
+      "population_count": 67,
+      "sample_count": 8
+    },
+    {
+      "query_set": "manual_iclr",
+      "specificity": 0,
+      "quality": 1,
+      "population_count": 8,
+      "sample_count": 2
+    },
+    {
+      "query_set": "manual_iclr",
+      "specificity": 0,
+      "quality": 2,
+      "population_count": 2,
+      "sample_count": 1
+    },
+    {
+      "query_set": "manual_iclr",
+      "specificity": 1,
+      "quality": 1,
+      "population_count": 45,
+      "sample_count": 6
+    },
+    {
+      "query_set": "manual_iclr",
+      "specificity": 1,
+      "quality": 2,
+      "population_count": 36,
+      "sample_count": 5
+    }
+  ]
+}

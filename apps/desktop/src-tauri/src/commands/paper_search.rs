@@ -1,15 +1,26 @@
 use crate::ccf::match_venue;
-use crate::commands::paper_search_plan::plan_paper_search_queries;
-use crate::llm::{resolve_temperature, LlmClient, LlmMessage};
+use crate::commands::paper_search_plan::{plan_paper_search_queries, PaperSearchIntent};
+use crate::commands::paper_search_ranking::{
+    fallback_overall_summary, fallback_ranking_note, heuristic_rank_papers, rerank_with_xiaoyan,
+    select_citation_seed_ids, PaperRecommendation, RankingMode,
+};
+use crate::commands::paper_search_response_cache;
+use crate::commands::paper_search_snippets::{
+    fetch_semantic_scholar_snippet_candidates, merge_full_text_retrieval_signal,
+};
+use crate::commands::paper_search_strategy::{
+    expand_citation_network, filter_low_quality_candidates, PaperRelation, SearchDepth,
+    SearchMetrics, SearchStep,
+};
 use crate::semantic_scholar::throttle_semantic_scholar_request;
 use crate::state::AppState;
 use anyhow::Context;
-use chrono::{Duration as ChronoDuration, Local, NaiveDate};
+use chrono::{Datelike, Duration as ChronoDuration, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::Row;
 use std::collections::{HashMap, HashSet};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::State;
 
 const SEMANTIC_SCHOLAR_API_URL: &str = "https://api.semanticscholar.org/graph/v1/paper/search";
@@ -18,37 +29,15 @@ const SEMANTIC_SCHOLAR_USER_AGENT: &str = "xiaoyan-desktop/0.5.2";
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case", default)]
 pub struct PaperSearchRequest {
-    topic: String,
-    all_terms: Vec<String>,
-    title_terms: Vec<String>,
-    abstract_terms: Vec<String>,
-    authors: Vec<String>,
-    categories: Vec<String>,
-    comments_terms: Vec<String>,
-    journal_ref_terms: Vec<String>,
-    exclude_terms: Vec<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RankingMode {
-    Relevance,
-    Quality,
-}
-
-impl RankingMode {
-    fn from_value(value: Option<&str>) -> Self {
-        match value.unwrap_or("relevance").trim() {
-            "quality" => Self::Quality,
-            _ => Self::Relevance,
-        }
-    }
-
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Relevance => "relevance",
-            Self::Quality => "quality",
-        }
-    }
+    pub(crate) topic: String,
+    pub(crate) all_terms: Vec<String>,
+    pub(crate) title_terms: Vec<String>,
+    pub(crate) abstract_terms: Vec<String>,
+    pub(crate) authors: Vec<String>,
+    pub(crate) categories: Vec<String>,
+    pub(crate) comments_terms: Vec<String>,
+    pub(crate) journal_ref_terms: Vec<String>,
+    pub(crate) exclude_terms: Vec<String>,
 }
 
 impl PaperSearchRequest {
@@ -81,8 +70,10 @@ impl PaperSearchRequest {
 #[serde(rename_all = "camelCase")]
 struct SemanticScholarPaper {
     paper_id: String,
-    title: String,
     #[serde(default)]
+    corpus_id: Option<i64>,
+    title: String,
+    #[serde(default, rename = "abstract")]
     abstract_text: Option<String>,
     #[serde(default)]
     year: Option<i32>,
@@ -124,6 +115,7 @@ struct SemanticScholarSearchResponse {
 #[derive(Debug, Clone)]
 pub(crate) struct PaperCandidate {
     pub(crate) id: String,
+    pub(crate) corpus_id: Option<i64>,
     pub(crate) title: String,
     pub(crate) authors: String,
     pub(crate) venue: String,
@@ -133,25 +125,9 @@ pub(crate) struct PaperCandidate {
     pub(crate) detail_url: String,
     pub(crate) pdf_url: String,
     pub(crate) citation_count: i32,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "snake_case")]
-struct PaperRecommendation {
-    arxiv_id: String,
-    title: String,
-    title_zh: Option<String>,
-    authors: String,
-    category: String,
-    published_at: String,
-    updated_at: String,
-    abstract_text: String,
-    abs_url: String,
-    pdf_url: String,
-    score: i32,
-    reason: String,
-    tldr_zh: Option<String>,
-    tags: Vec<String>,
+    pub(crate) discovered_via: String,
+    pub(crate) retrieval_text: String,
+    pub(crate) retrieval_score: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -164,6 +140,11 @@ struct PaperSearchResponse {
     search_queries: Vec<String>,
     query_plan_llm_used: bool,
     query_plan_note: String,
+    search_intent: PaperSearchIntent,
+    search_depth: String,
+    strategy_trace: Vec<SearchStep>,
+    metrics: SearchMetrics,
+    relations: Vec<PaperRelation>,
     cutoff_date: String,
     limit: usize,
     ranking_mode: String,
@@ -173,25 +154,20 @@ struct PaperSearchResponse {
     overall_summary: String,
     disclaimer: String,
     papers: Vec<PaperRecommendation>,
+    #[cfg(test)]
+    evaluation_candidates: Vec<PaperSearchEvaluationCandidate>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[cfg(test)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
-struct LlmRankingResponse {
-    overall_summary: Option<String>,
-    ranking_note: Option<String>,
-    papers: Vec<LlmRankingPaper>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "snake_case")]
-struct LlmRankingPaper {
-    id: String,
-    score: Option<i32>,
-    reason: Option<String>,
-    title_zh: Option<String>,
-    tldr_zh: Option<String>,
-    tags: Option<Vec<String>>,
+struct PaperSearchEvaluationCandidate {
+    paper_id: String,
+    corpus_id: Option<i64>,
+    title: String,
+    rank: usize,
+    score: i32,
+    discovered_via: String,
 }
 
 fn normalize_cutoff_date(value: Option<&str>, today: NaiveDate) -> Result<String, String> {
@@ -213,7 +189,29 @@ pub async fn paper_search(
     cutoff_date: Option<String>,
     limit: Option<i32>,
     ranking_mode: Option<String>,
+    search_depth: Option<String>,
 ) -> Result<serde_json::Value, String> {
+    let settings = state.settings.read().await.clone();
+    execute_paper_search(
+        &settings,
+        request,
+        cutoff_date,
+        limit,
+        ranking_mode,
+        search_depth,
+    )
+    .await
+}
+
+pub(crate) async fn execute_paper_search(
+    settings: &HashMap<String, String>,
+    request: PaperSearchRequest,
+    cutoff_date: Option<String>,
+    limit: Option<i32>,
+    ranking_mode: Option<String>,
+    search_depth: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let total_started = Instant::now();
     let request = request.normalize();
     if !request.has_search_terms() {
         return Err("请至少填写一个检索条件".into());
@@ -222,25 +220,48 @@ pub async fn paper_search(
     let cutoff_date = normalize_cutoff_date(cutoff_date.as_deref(), Local::now().date_naive())?;
     let result_limit = limit.unwrap_or(6).clamp(1, 50) as usize;
     let mode = RankingMode::from_value(ranking_mode.as_deref());
-    let settings = state.settings.read().await.clone();
-
+    let depth = SearchDepth::from_value(search_depth.as_deref());
     let query = describe_request(&request);
     let keywords = collect_keywords(&request);
     let structured_terms = collect_structured_search_terms(&request);
-    let search_plan = plan_paper_search_queries(&settings, &request.topic, &structured_terms).await;
+    let plan_started = Instant::now();
+    let search_plan = plan_paper_search_queries(settings, &request.topic, &structured_terms).await;
     if search_plan.queries.is_empty() {
         return Err("无法从当前输入生成有效检索式，请补充更具体的自然语言需求或关键词".into());
     }
-    let search_expression = search_plan.queries.join("\n");
+    let search_queries = search_plan
+        .queries
+        .iter()
+        .take(depth.query_limit())
+        .cloned()
+        .collect::<Vec<_>>();
+    let search_expression = search_queries.join("\n");
+    let mut metrics = SearchMetrics {
+        llm_calls: search_plan.llm_calls,
+        estimated_tokens: search_plan.estimated_tokens,
+        iterations: 1,
+        ..SearchMetrics::default()
+    };
+    let mut strategy_trace = vec![SearchStep {
+        stage: "query_plan",
+        label: "查询理解与分解".into(),
+        status: "completed",
+        query: None,
+        candidate_count: Some(search_queries.len()),
+        duration_ms: plan_started.elapsed().as_millis() as u64,
+        note: search_plan.note.clone(),
+    }];
 
     let publication_date_range = format!(":{cutoff_date}");
     let mut candidates = Vec::new();
     let mut seen_candidates = HashSet::new();
     let mut successful_queries = 0usize;
     let mut last_search_error = None;
-    for search_query in &search_plan.queries {
+    for search_query in &search_queries {
+        let query_started = Instant::now();
+        metrics.academic_api_calls += 1;
         match fetch_semantic_scholar_candidates_with_date_range(
-            &settings,
+            settings,
             search_query,
             &request.exclude_terms,
             Some(&publication_date_range),
@@ -250,6 +271,7 @@ pub async fn paper_search(
         {
             Ok(query_candidates) => {
                 successful_queries += 1;
+                let query_candidate_count = query_candidates.len();
                 for candidate in query_candidates {
                     let key = if candidate.id.trim().is_empty() {
                         format!("title:{}", candidate.title.trim().to_lowercase())
@@ -260,25 +282,126 @@ pub async fn paper_search(
                         candidates.push(candidate);
                     }
                 }
+                strategy_trace.push(SearchStep {
+                    stage: "academic_search",
+                    label: "Semantic Scholar 学术检索".into(),
+                    status: "completed",
+                    query: Some(search_query.clone()),
+                    candidate_count: Some(query_candidate_count),
+                    duration_ms: query_started.elapsed().as_millis() as u64,
+                    note: "已完成一条子查询并合并去重候选。".into(),
+                });
             }
-            Err(error) => last_search_error = Some(error),
+            Err(error) => {
+                strategy_trace.push(SearchStep {
+                    stage: "academic_search",
+                    label: "Semantic Scholar 学术检索".into(),
+                    status: "partial",
+                    query: Some(search_query.clone()),
+                    candidate_count: Some(0),
+                    duration_ms: query_started.elapsed().as_millis() as u64,
+                    note: format!("该子查询失败，继续保留其他查询结果：{error:#}"),
+                });
+                last_search_error = Some(error);
+            }
         }
+    }
+    if depth.uses_full_text_snippets() {
+        let snippet_started = Instant::now();
+        let snippet_expansion = fetch_semantic_scholar_snippet_candidates(
+            settings,
+            &request.topic,
+            &request.exclude_terms,
+            &cutoff_date,
+            snippet_candidate_pool_size(result_limit),
+        )
+        .await;
+        metrics.academic_api_calls += snippet_expansion.api_calls;
+        let snippet_candidate_count = snippet_expansion.candidates.len();
+        if snippet_expansion.error.is_none() {
+            successful_queries += 1;
+        }
+        for candidate in snippet_expansion.candidates {
+            let key = if candidate.id.trim().is_empty() {
+                format!("title:{}", candidate.title.trim().to_lowercase())
+            } else {
+                format!("id:{}", candidate.id)
+            };
+            if seen_candidates.insert(key) {
+                candidates.push(candidate);
+            } else if let Some(existing) = candidates
+                .iter_mut()
+                .find(|existing| existing.id == candidate.id)
+            {
+                merge_full_text_retrieval_signal(existing, &candidate);
+            }
+        }
+        strategy_trace.push(SearchStep {
+            stage: "full_text_search",
+            label: "Semantic Scholar 全文片段检索".into(),
+            status: if snippet_expansion.error.is_none() {
+                "completed"
+            } else {
+                "partial"
+            },
+            query: Some(request.topic.clone()),
+            candidate_count: Some(snippet_candidate_count),
+            duration_ms: snippet_started.elapsed().as_millis() as u64,
+            note: snippet_expansion.error.map_or_else(
+                || "已按标题、摘要与正文片段补充描述型查询候选。".into(),
+                |error| format!("全文片段检索失败，继续保留论文级结果：{error}"),
+            ),
+        });
     }
     if successful_queries == 0 {
         return Err(last_search_error
-            .map(|error| error.to_string())
+            .map(|error| format!("{error:#}"))
             .unwrap_or_else(|| "联网学术检索失败".to_string()));
     }
 
+    let candidate_count_before_filter = candidates.len();
+    let unfiltered_candidates = candidates.clone();
+    let (filtered_candidates, filtered_count) = filter_low_quality_candidates(candidates);
+    candidates = if filtered_candidates.is_empty() && candidate_count_before_filter > 0 {
+        strategy_trace.push(SearchStep {
+            stage: "quality_filter",
+            label: "低质量候选过滤".into(),
+            status: "partial",
+            query: None,
+            candidate_count: Some(candidate_count_before_filter),
+            duration_ms: 0,
+            note: "质量门槛会移除全部候选，已保留首轮结果以避免召回归零。".into(),
+        });
+        unfiltered_candidates
+    } else {
+        metrics.filtered_count += filtered_count;
+        strategy_trace.push(SearchStep {
+            stage: "quality_filter",
+            label: "低质量候选过滤".into(),
+            status: "completed",
+            query: None,
+            candidate_count: Some(filtered_candidates.len()),
+            duration_ms: 0,
+            note: format!("移除 {filtered_count} 条缺少基本学术元数据或明确异常的记录。"),
+        });
+        filtered_candidates
+    };
+
     if candidates.is_empty() {
+        metrics.duration_ms = total_started.elapsed().as_millis() as u64;
         let empty = PaperSearchResponse {
             query,
             keywords,
             applied_filters: request.clone(),
             search_expression,
-            search_queries: search_plan.queries,
+            search_queries,
             query_plan_llm_used: search_plan.llm_used,
             query_plan_note: search_plan.note,
+            search_intent: search_plan.intent,
+            search_depth: depth.as_str().into(),
+            strategy_trace,
+            metrics,
+            relations: Vec::new(),
             cutoff_date,
             limit: result_limit,
             ranking_mode: mode.as_str().to_string(),
@@ -289,42 +412,88 @@ pub async fn paper_search(
                 .into(),
             disclaimer: "检索结果来自联网学术数据源，覆盖范围与实时性受第三方接口影响。".into(),
             papers: Vec::new(),
+            #[cfg(test)]
+            evaluation_candidates: Vec::new(),
         };
         return Ok(json!(empty));
+    }
+
+    let seed_ids =
+        select_citation_seed_ids(&candidates, &request, &search_queries, depth.seed_limit());
+    let expansion = expand_citation_network(settings, &seed_ids, depth).await;
+    metrics.academic_api_calls += expansion.api_calls;
+    if expansion.api_calls > 0 {
+        metrics.iterations += 1;
+    }
+    strategy_trace.extend(expansion.steps);
+    let mut relations = expansion.relations;
+    for candidate in expansion.candidates {
+        if !candidate_matches_cutoff(&candidate, &cutoff_date)
+            || candidate_matches_exclusion(&candidate, &request.exclude_terms)
+        {
+            metrics.filtered_count += 1;
+            continue;
+        }
+        let key = if candidate.id.trim().is_empty() {
+            format!("title:{}", candidate.title.trim().to_lowercase())
+        } else {
+            format!("id:{}", candidate.id)
+        };
+        if seen_candidates.insert(key) {
+            candidates.push(candidate);
+        }
+    }
+
+    let unfiltered_expanded = candidates.clone();
+    let (filtered_candidates, expansion_filtered) = filter_low_quality_candidates(candidates);
+    if filtered_candidates.is_empty() && !unfiltered_expanded.is_empty() {
+        candidates = unfiltered_expanded;
+    } else {
+        candidates = filtered_candidates;
+        metrics.filtered_count += expansion_filtered;
     }
 
     // 对全部候选做启发式排序，既用于无 LLM 时的降级，也用于 LLM 返回不足时的兜底回填。
     let heuristic = heuristic_rank_papers(
         &candidates,
         &request,
-        &search_plan.queries,
+        &search_queries,
         mode,
         candidates.len().max(result_limit),
     );
-    let (llm_used, ranking_note, overall_summary, mut papers) =
-        match rerank_with_xiaoyan(&settings, &query, &request, mode, result_limit, &candidates)
-            .await
-        {
-            Ok(Some((note, summary, ranked))) => (true, note, summary, ranked),
-            Ok(None) => (
-                false,
-                format!(
+    let rerank = rerank_with_xiaoyan(
+        settings,
+        &query,
+        &query,
+        &search_queries,
+        mode,
+        result_limit,
+        &candidates,
+    )
+    .await;
+    metrics.llm_calls += rerank.llm_calls;
+    metrics.estimated_tokens += rerank.estimated_tokens;
+    let (llm_used, ranking_note, overall_summary, mut papers) = match rerank.ranking {
+        Some((note, summary, ranked)) => (true, note, summary, ranked),
+        None => {
+            let fallback_note = match rerank.error {
+                Some(error) => {
+                    eprintln!("小妍论文重排失败，使用启发式排序：{error}");
+                    format!("小妍模型重排未完成，{}", fallback_ranking_note(mode))
+                }
+                None => format!(
                     "未检测到可用的论文检索模型或小妍主模型，{}",
                     fallback_ranking_note(mode)
                 ),
+            };
+            (
+                false,
+                fallback_note,
                 fallback_overall_summary(mode, candidates.len(), result_limit),
                 heuristic.iter().take(result_limit).cloned().collect(),
-            ),
-            Err(error) => {
-                eprintln!("小妍论文重排失败，使用启发式排序：{error}");
-                (
-                    false,
-                    format!("小妍模型重排未完成，{}", fallback_ranking_note(mode)),
-                    fallback_overall_summary(mode, candidates.len(), result_limit),
-                    heuristic.iter().take(result_limit).cloned().collect(),
-                )
-            }
-        };
+            )
+        }
+    };
 
     // LLM 仅对前若干候选重排，返回不足目标篇数时用启发式结果按相关性补齐，尽量凑满 limit。
     if papers.len() < result_limit {
@@ -339,14 +508,65 @@ pub async fn paper_search(
         }
     }
 
+    strategy_trace.push(SearchStep {
+        stage: "rerank",
+        label: "候选综合排序".into(),
+        status: "completed",
+        query: None,
+        candidate_count: Some(papers.len()),
+        duration_ms: 0,
+        note: if llm_used {
+            "已结合标题、摘要、影响力与原始查询完成模型重排。".into()
+        } else {
+            "模型不可用或返回无效，已使用确定性启发式排序。".into()
+        },
+    });
+    let final_ids = papers
+        .iter()
+        .map(|paper| paper.arxiv_id.as_str())
+        .collect::<HashSet<_>>();
+    // 引文扩展统一以种子论文为 source、扩展命中为 target。只要扩展论文进入最终
+    // 推荐就保留发现路径；种子未进入最终列表时，前端仍可用论文 id 展示该节点。
+    relations.retain(|relation| final_ids.contains(relation.target_id.as_str()));
+    metrics.duration_ms = total_started.elapsed().as_millis() as u64;
+
+    #[cfg(test)]
+    let evaluation_candidates = {
+        let candidates_by_id = candidates
+            .iter()
+            .map(|candidate| (candidate.id.as_str(), candidate))
+            .collect::<HashMap<_, _>>();
+        heuristic
+            .iter()
+            .enumerate()
+            .filter_map(|(index, ranked)| {
+                candidates_by_id
+                    .get(ranked.arxiv_id.as_str())
+                    .map(|candidate| PaperSearchEvaluationCandidate {
+                        paper_id: candidate.id.clone(),
+                        corpus_id: candidate.corpus_id,
+                        title: candidate.title.clone(),
+                        rank: index + 1,
+                        score: ranked.evaluation_score(),
+                        discovered_via: candidate.discovered_via.clone(),
+                    })
+            })
+            .collect::<Vec<_>>()
+    };
+
     let response = PaperSearchResponse {
         query,
         keywords,
         applied_filters: request,
         search_expression,
-        search_queries: search_plan.queries,
+        search_queries,
         query_plan_llm_used: search_plan.llm_used,
         query_plan_note: search_plan.note,
+        search_intent: search_plan.intent,
+        search_depth: depth.as_str().into(),
+        strategy_trace,
+        metrics,
+        relations,
         cutoff_date,
         limit: result_limit,
         ranking_mode: mode.as_str().to_string(),
@@ -356,6 +576,8 @@ pub async fn paper_search(
         overall_summary,
         disclaimer: "检索结果来自联网学术数据源，覆盖范围与实时性受第三方接口影响。".into(),
         papers,
+        #[cfg(test)]
+        evaluation_candidates,
     };
 
     Ok(json!(response))
@@ -508,6 +730,11 @@ async fn fetch_semantic_scholar_candidates_with_date_range(
     publication_date_range: Option<&str>,
     max_results: usize,
 ) -> anyhow::Result<Vec<PaperCandidate>> {
+    let cache_key = format!(
+        "semantic-scholar-search-v1|{query}|{}|{max_results}",
+        publication_date_range.unwrap_or_default()
+    );
+    let cached_payload = paper_search_response_cache::load(&cache_key)?;
     let client = reqwest::Client::new();
     let mut builder = client
         .get(SEMANTIC_SCHOLAR_API_URL)
@@ -517,7 +744,7 @@ async fn fetch_semantic_scholar_candidates_with_date_range(
             ("limit", max_results.to_string()),
             (
                 "fields",
-                "paperId,title,abstract,year,venue,url,citationCount,publicationDate,authors,openAccessPdf"
+                "paperId,corpusId,title,abstract,year,venue,url,citationCount,publicationDate,authors,openAccessPdf"
                     .to_string(),
             ),
         ]);
@@ -536,35 +763,47 @@ async fn fetch_semantic_scholar_candidates_with_date_range(
 
     let base_request = builder.build().context("联网检索请求构建失败")?;
 
-    const MAX_RETRIES: u32 = 3;
-    let mut attempt = 0u32;
-    let response = loop {
-        let req = base_request.try_clone().context("联网检索请求克隆失败")?;
-        throttle_semantic_scholar_request().await;
-        let resp = client.execute(req).await.context("联网检索请求失败")?;
-        if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            attempt += 1;
-            if attempt >= MAX_RETRIES {
-                return Err(anyhow::anyhow!(
-                    "Semantic Scholar 接口触发速率限制（429）。\n\
-                     请在「设置 → 外部学术服务」中配置 Semantic Scholar API Key 以获得更高频次限额。\n\
-                     免费 Key 申请：https://www.semanticscholar.org/product/api#api-key-form"
-                ));
+    let payload: SemanticScholarSearchResponse = if let Some(payload) = cached_payload {
+        serde_json::from_slice(&payload).context("解析论文评测响应缓存失败")?
+    } else {
+        const MAX_RETRIES: u32 = 4;
+        let mut attempt = 0u32;
+        let response = loop {
+            let req = base_request.try_clone().context("联网检索请求克隆失败")?;
+            throttle_semantic_scholar_request().await;
+            let resp = client.execute(req).await.context("联网检索请求失败")?;
+            if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                attempt += 1;
+                if attempt >= MAX_RETRIES {
+                    return Err(anyhow::anyhow!(
+                        "Semantic Scholar 接口触发速率限制（429）。\n\
+                         请在「设置 → 外部学术服务」中配置 Semantic Scholar API Key 以获得更高频次限额。\n\
+                         免费 Key 申请：https://www.semanticscholar.org/product/api#api-key-form"
+                    ));
+                }
+                let retry_after = resp
+                    .headers()
+                    .get(reqwest::header::RETRY_AFTER)
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(|value| value.parse::<u64>().ok());
+                let wait_secs = retry_after
+                    .unwrap_or_else(|| 2u64.pow(attempt))
+                    .clamp(2, 30);
+                tokio::time::sleep(Duration::from_secs(wait_secs)).await;
+                continue;
             }
-            let wait_secs = 2u64.pow(attempt);
-            tokio::time::sleep(Duration::from_secs(wait_secs)).await;
-            continue;
+            break resp;
+        };
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(anyhow::anyhow!("联网检索返回错误 {status}: {body}"));
         }
-        break resp;
+        let response_bytes = response.bytes().await.context("读取联网检索结果失败")?;
+        let parsed = serde_json::from_slice(&response_bytes).context("解析联网检索结果失败")?;
+        paper_search_response_cache::store(&cache_key, &response_bytes)?;
+        parsed
     };
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        return Err(anyhow::anyhow!("联网检索返回错误 {status}: {body}"));
-    }
-
-    let payload: SemanticScholarSearchResponse =
-        response.json().await.context("解析联网检索结果失败")?;
 
     let mut result = Vec::new();
     for item in payload.data {
@@ -607,6 +846,7 @@ async fn fetch_semantic_scholar_candidates_with_date_range(
 
         result.push(PaperCandidate {
             id: item.paper_id,
+            corpus_id: item.corpus_id,
             title: item.title,
             authors,
             venue,
@@ -616,214 +856,37 @@ async fn fetch_semantic_scholar_candidates_with_date_range(
             detail_url,
             pdf_url,
             citation_count: item.citation_count.unwrap_or(0),
+            discovered_via: "search".into(),
+            retrieval_text: String::new(),
+            retrieval_score: None,
         });
     }
 
     Ok(result)
 }
 
-async fn rerank_with_xiaoyan(
-    settings: &HashMap<String, String>,
-    query: &str,
-    request: &PaperSearchRequest,
-    mode: RankingMode,
-    limit: usize,
-    candidates: &[PaperCandidate],
-) -> anyhow::Result<Option<(String, String, Vec<PaperRecommendation>)>> {
-    let (client, model) = match LlmClient::literature_client_with_main_fallback(settings) {
-        Ok(resolved) => resolved,
-        Err(_) => return Ok(None),
+fn candidate_matches_cutoff(candidate: &PaperCandidate, cutoff_date: &str) -> bool {
+    let Ok(cutoff) = NaiveDate::parse_from_str(cutoff_date, "%Y-%m-%d") else {
+        return true;
     };
-    let temperature =
-        resolve_temperature(settings, "multi_agent_literature_scout_temperature", 0.2);
-
-    let payload = candidates
-        .iter()
-        .take(40)
-        .map(|paper| {
-            json!({
-                "id": paper.id,
-                "title": paper.title,
-                "authors": paper.authors,
-                "year": paper.year,
-                "venue": paper.venue,
-                "abstract": paper.abstract_text,
-                "url": paper.detail_url,
-                "pdf_url": paper.pdf_url,
-                "citation_count": paper.citation_count,
-            })
-        })
-        .collect::<Vec<_>>();
-
-    let ranking_focus = match mode {
-        RankingMode::Relevance => "与用户问题的贴合度、研究问题匹配度、可读性",
-        RankingMode::Quality => "方法与实验信号、影响力、研究完整性",
-    };
-
-    let prompt = format!(
-        "你是小妍的论文检索子助手。请基于联网候选论文，输出最终推荐结果。\n\n用户问题：{query}\n检索约束：{filters}\n排序偏好：{ranking_focus}\n返回数量：{limit}\n\n候选论文（JSON）：\n{payload}\n\n只返回 JSON，不要额外解释，格式必须是：\n{{\n  \"overall_summary\": \"...\",\n  \"ranking_note\": \"...\",\n  \"papers\": [\n    {{\n      \"id\": \"候选 id\",\n      \"score\": 0-100 整数,\n      \"reason\": \"推荐理由\",\n      \"title_zh\": \"可选\",\n      \"tldr_zh\": \"可选\",\n      \"tags\": [\"标签1\", \"标签2\"]\n    }}\n  ]\n}}",
-        filters = describe_request(request),
-        payload = serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "[]".to_string()),
-    );
-
-    let messages = vec![
-        LlmMessage::system("你是科研论文检索助手，输出必须严格遵守 JSON 格式。"),
-        LlmMessage::user(prompt),
-    ];
-
-    let raw = client
-        .chat(&messages, model.as_deref(), temperature)
-        .await?;
-    let clean = crate::commands::papers::extract_json_pub(&raw);
-    let parsed: LlmRankingResponse = match serde_json::from_str(&clean) {
-        Ok(v) => v,
-        Err(_) => return Ok(None),
-    };
-
-    let mut by_id = HashMap::new();
-    for candidate in candidates {
-        by_id.insert(candidate.id.clone(), candidate.clone());
-    }
-
-    let mut selected = Vec::new();
-    let mut seen = HashSet::new();
-    for item in parsed.papers {
-        if selected.len() >= limit {
-            break;
+    if let Some(prefix) = candidate.published_at.get(..10) {
+        if let Ok(published) = NaiveDate::parse_from_str(prefix, "%Y-%m-%d") {
+            return published <= cutoff;
         }
-        let Some(candidate) = by_id.get(&item.id) else {
-            continue;
-        };
-        if !seen.insert(candidate.id.clone()) {
-            continue;
-        }
-
-        selected.push(PaperRecommendation {
-            arxiv_id: candidate.id.clone(),
-            title: candidate.title.clone(),
-            title_zh: item.title_zh,
-            authors: candidate.authors.clone(),
-            category: candidate.venue.clone(),
-            published_at: candidate.published_at.clone(),
-            updated_at: candidate.published_at.clone(),
-            abstract_text: candidate.abstract_text.clone(),
-            abs_url: candidate.detail_url.clone(),
-            pdf_url: candidate.pdf_url.clone(),
-            score: item.score.unwrap_or(75).clamp(0, 100),
-            reason: item
-                .reason
-                .unwrap_or_else(|| "与当前研究主题相关".to_string()),
-            tldr_zh: item.tldr_zh,
-            tags: item.tags.unwrap_or_default(),
-        });
     }
-
-    if selected.is_empty() {
-        return Ok(None);
-    }
-
-    Ok(Some((
-        parsed
-            .ranking_note
-            .unwrap_or_else(|| fallback_ranking_note(mode).to_string()),
-        parsed
-            .overall_summary
-            .unwrap_or_else(|| fallback_overall_summary(mode, candidates.len(), limit)),
-        selected,
-    )))
+    candidate.year.is_none_or(|year| year <= cutoff.year())
 }
 
-fn heuristic_rank_papers(
-    candidates: &[PaperCandidate],
-    request: &PaperSearchRequest,
-    search_queries: &[String],
-    mode: RankingMode,
-    limit: usize,
-) -> Vec<PaperRecommendation> {
-    let query_tokens = search_queries
+fn candidate_matches_exclusion(candidate: &PaperCandidate, exclude_terms: &[String]) -> bool {
+    let haystack = format!(
+        "{} {} {}",
+        candidate.title, candidate.abstract_text, candidate.venue
+    )
+    .to_lowercase();
+    exclude_terms
         .iter()
-        .flat_map(|query| {
-            query.split(|character: char| !character.is_alphanumeric() && character != '-')
-        })
-        .map(|token| token.trim().to_lowercase())
-        .filter(|token| token.chars().count() >= 3)
-        .collect::<HashSet<_>>();
-    let mut scored = candidates
-        .iter()
-        .map(|paper| {
-            let mut score = 55_i32;
-            let text = format!(
-                "{}\n{}\n{}\n{}",
-                paper.title, paper.abstract_text, paper.authors, paper.venue
-            )
-            .to_lowercase();
-
-            let add_match_score = |terms: &[String], weight: i32| -> i32 {
-                terms
-                    .iter()
-                    .filter(|term| {
-                        let t = term.trim().to_lowercase();
-                        !t.is_empty() && text.contains(&t)
-                    })
-                    .count() as i32
-                    * weight
-            };
-
-            score += add_match_score(&request.all_terms, 6);
-            score += add_match_score(&request.title_terms, 8);
-            score += add_match_score(&request.abstract_terms, 6);
-            score += add_match_score(&request.authors, 10);
-            score += add_match_score(&request.journal_ref_terms, 8);
-            score += add_match_score(&request.categories, 4);
-            score += (query_tokens
-                .iter()
-                .filter(|token| text.contains(token.as_str()))
-                .count() as i32
-                * 2)
-            .min(18);
-            score += (paper.citation_count / 200).clamp(0, 12);
-
-            if mode == RankingMode::Quality {
-                score += (paper.citation_count / 120).clamp(0, 16);
-            }
-
-            (
-                score.clamp(0, 100),
-                PaperRecommendation {
-                    arxiv_id: paper.id.clone(),
-                    title: paper.title.clone(),
-                    title_zh: None,
-                    authors: paper.authors.clone(),
-                    category: paper.venue.clone(),
-                    published_at: paper.published_at.clone(),
-                    updated_at: paper.published_at.clone(),
-                    abstract_text: paper.abstract_text.clone(),
-                    abs_url: paper.detail_url.clone(),
-                    pdf_url: paper.pdf_url.clone(),
-                    score: 0,
-                    reason: match mode {
-                        RankingMode::Relevance => "与当前检索条件的关键词匹配度较高。".to_string(),
-                        RankingMode::Quality => {
-                            "在候选论文中具备更强的影响力与研究信号。".to_string()
-                        }
-                    },
-                    tldr_zh: None,
-                    tags: Vec::new(),
-                },
-            )
-        })
-        .collect::<Vec<_>>();
-
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
-
-    scored
-        .into_iter()
-        .take(limit)
-        .map(|(score, mut paper)| {
-            paper.score = score;
-            paper
-        })
-        .collect()
+        .map(|term| term.trim().to_lowercase())
+        .any(|term| !term.is_empty() && haystack.contains(&term))
 }
 
 fn matches_year_range(year: Option<i32>, year_from: Option<i32>, year_to: Option<i32>) -> bool {
@@ -952,26 +1015,8 @@ fn candidate_pool_size(limit: usize) -> usize {
     (limit.saturating_mul(4)).clamp(12, 100)
 }
 
-fn fallback_ranking_note(mode: RankingMode) -> &'static str {
-    match mode {
-        RankingMode::Relevance => "已使用启发式相关性排序。",
-        RankingMode::Quality => "已使用启发式质量信号排序。",
-    }
-}
-
-fn fallback_overall_summary(mode: RankingMode, candidates: usize, limit: usize) -> String {
-    match mode {
-        RankingMode::Relevance => format!(
-            "从 {} 篇联网候选论文中筛选出最相关的 {} 篇，建议先读前 2 篇建立问题框架。",
-            candidates,
-            candidates.min(limit)
-        ),
-        RankingMode::Quality => format!(
-            "从 {} 篇联网候选论文中筛选出研究信号更强的 {} 篇，建议优先关注方法与实验部分。",
-            candidates,
-            candidates.min(limit)
-        ),
-    }
+fn snippet_candidate_pool_size(limit: usize) -> usize {
+    limit.clamp(10, 20)
 }
 
 // ── Search history persistence ─────────────────────────────────────────
@@ -1077,7 +1122,10 @@ pub async fn paper_search_delete_history(
 
 #[cfg(test)]
 mod tests {
-    use super::{collect_survey_search_terms, normalize_cutoff_date};
+    use super::{
+        collect_survey_search_terms, normalize_cutoff_date, snippet_candidate_pool_size,
+        SemanticScholarPaper,
+    };
     use chrono::NaiveDate;
 
     #[test]
@@ -1111,5 +1159,22 @@ mod tests {
             terms,
             vec!["diffusion model", "text to image", "controlnet"]
         );
+    }
+
+    #[test]
+    fn snippet_candidate_pool_stays_in_the_validated_relevance_window() {
+        assert_eq!(snippet_candidate_pool_size(6), 10);
+        assert_eq!(snippet_candidate_pool_size(20), 20);
+        assert_eq!(snippet_candidate_pool_size(50), 20);
+    }
+
+    #[test]
+    fn semantic_scholar_abstract_field_is_preserved() {
+        let paper: SemanticScholarPaper = serde_json::from_str(
+            r#"{"paperId":"paper-1","title":"A paper","abstract":"Published abstract"}"#,
+        )
+        .expect("Semantic Scholar paper should deserialize");
+
+        assert_eq!(paper.abstract_text.as_deref(), Some("Published abstract"));
     }
 }

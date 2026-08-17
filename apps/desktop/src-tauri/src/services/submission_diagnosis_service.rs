@@ -130,6 +130,10 @@ fn build_summary(risk: &DiagnosisRiskLevel, reviews: &[Value]) -> String {
     parts.join("\n")
 }
 
+fn collect_evidence_locations(reviews: &[Value]) -> Vec<String> {
+    collect_json_list(reviews, "evidence_locations", 8)
+}
+
 pub(crate) fn collect_issue_labels(report_json: &Value) -> Vec<String> {
     let Some(reviews) = report_json
         .get("parsed_reviews")
@@ -203,6 +207,7 @@ pub async fn save_ai_review_diagnosis_report(
             "raw": item.raw,
         })).collect::<Vec<_>>(),
         "parsed_reviews": parsed_reviews,
+        "evidence_locations": collect_evidence_locations(&parsed_reviews),
     });
 
     sqlx::query(
@@ -330,7 +335,7 @@ pub async fn import_diagnosis_report_to_checklist(
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_risk, collect_issue_labels, collect_json_list,
+        classify_risk, collect_evidence_locations, collect_issue_labels, collect_json_list,
         import_diagnosis_report_to_checklist, list_submission_diagnosis_reports,
         save_ai_review_diagnosis_report, DiagnosisRiskLevel, ReviewerDiagnosisInput,
     };
@@ -369,6 +374,19 @@ mod tests {
                 "回应诊断问题：泛化性如何？",
                 "采纳诊断建议：补一个消融实验",
             ]
+        );
+    }
+
+    #[test]
+    fn keeps_review_evidence_locations_separate_from_issue_labels() {
+        let reviews = vec![json!({
+            "evidence_locations": ["Sec. 4.2 消融实验", "仅摘要，无法定位全文位置"],
+            "weaknesses": ["缺少跨域验证"]
+        })];
+
+        assert_eq!(
+            collect_evidence_locations(&reviews),
+            vec!["Sec. 4.2 消融实验", "仅摘要，无法定位全文位置"]
         );
     }
 

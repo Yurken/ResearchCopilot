@@ -670,6 +670,44 @@ pub async fn submission_delete_comment(
     Ok(())
 }
 
+#[tauri::command]
+pub async fn submission_upsert_review_feedback(
+    state: State<'_, AppState>,
+    submission_id: String,
+    review_run_id: String,
+    reviewer: String,
+    item_key: String,
+    suggestion: String,
+    status: String,
+    reason: Option<String>,
+) -> Result<serde_json::Value, String> {
+    crate::services::submission_feedback_service::upsert_review_feedback(
+        &state.db,
+        crate::services::submission_feedback_service::ReviewFeedbackInput {
+            submission_id: &submission_id,
+            review_run_id: &review_run_id,
+            reviewer: &reviewer,
+            item_key: &item_key,
+            suggestion: &suggestion,
+            status: &status,
+            reason: reason.as_deref(),
+        },
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(json!({ "ok": true }))
+}
+
+#[tauri::command]
+pub async fn submission_review_feedback_summary(
+    state: State<'_, AppState>,
+    submission_id: String,
+) -> Result<serde_json::Value, String> {
+    crate::services::submission_feedback_service::review_feedback_summary(&state.db, &submission_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
 // ══════════════════════════════════════════════════════════════════════════
 //  Checklist
 // ══════════════════════════════════════════════════════════════════════════
@@ -874,10 +912,7 @@ pub async fn submission_ai_review(
             "paper_analysis_api_key",
             "multi_agent_paper_analyst_api_key",
         ],
-        &[
-            "paper_analysis_model",
-            "multi_agent_paper_analyst_model",
-        ],
+        &["paper_analysis_model", "multi_agent_paper_analyst_model"],
     )
     .map_err(|e| e.to_string())?;
     let model = if is_scoped {
@@ -995,10 +1030,7 @@ pub async fn submission_polish_abstract(
             "paper_analysis_api_key",
             "multi_agent_paper_analyst_api_key",
         ],
-        &[
-            "paper_analysis_model",
-            "multi_agent_paper_analyst_model",
-        ],
+        &["paper_analysis_model", "multi_agent_paper_analyst_model"],
     )
     .map_err(|e| e.to_string())?;
     let model = if is_scoped {
@@ -1070,10 +1102,7 @@ pub async fn submission_generate_cover_letter(
             "paper_analysis_api_key",
             "multi_agent_paper_analyst_api_key",
         ],
-        &[
-            "paper_analysis_model",
-            "multi_agent_paper_analyst_model",
-        ],
+        &["paper_analysis_model", "multi_agent_paper_analyst_model"],
     )
     .map_err(|e| e.to_string())?;
     let model = if is_scoped {

@@ -163,6 +163,19 @@ export default function Copilot({ hideFolders = false }: { hideFolders?: boolean
     setInput: chat.setInput,
     markLastSessionRestored,
   });
+  const handleReviewCheckpoint = useCallback(async (status: "confirmed" | "corrected" | "withdrawn", note?: string) => {
+    if (!checkpointHandoff) return;
+    try {
+      await apiClient.memory.reviewCheckpoint(checkpointHandoff.id, status, note);
+      if (status === "withdrawn") {
+        handleDismissCheckpointHandoff();
+        return;
+      }
+      setCheckpointHandoff((current) => current ? { ...current, reviewStatus: status, reviewNote: note ?? current.reviewNote } : current);
+    } catch (error) {
+      sessions.setLoadError(formatErrorMessage(error));
+    }
+  }, [checkpointHandoff, handleDismissCheckpointHandoff, sessions, setCheckpointHandoff]);
 
   // Sync chat reset with session changes
   const handleNewChat = useCallback(() => {
@@ -356,6 +369,7 @@ export default function Copilot({ hideFolders = false }: { hideFolders?: boolean
               <CopilotCheckpointContextBar
                 handoff={checkpointHandoff}
                 onDismiss={handleDismissCheckpointHandoff}
+                onReview={(status, note) => void handleReviewCheckpoint(status, note)}
               />
             ) : null}
 

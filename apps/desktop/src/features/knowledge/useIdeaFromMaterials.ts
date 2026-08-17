@@ -50,6 +50,7 @@ export function useIdeaFromMaterials() {
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState<IdeaMaterialItem[]>([]);
   const [ideas, setIdeas] = useState<ResearchIdeaSuggestion[]>([]);
+  const [feedback, setFeedback] = useState("");
   const [reading, setReading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -133,7 +134,7 @@ export function useIdeaFromMaterials() {
     setError("");
     setIdeas([]);
     try {
-      const result = await apiClient.knowledge.ideasFromMaterials(materials, images);
+      const result = await apiClient.knowledge.ideasFromMaterials(materials, images, feedback.trim());
       setIdeas(result);
     } catch (err) {
       setError(formatErrorMessage(err));
@@ -147,6 +148,8 @@ export function useIdeaFromMaterials() {
     setNotes,
     items,
     ideas,
+    feedback,
+    setFeedback,
     reading,
     loading,
     error,

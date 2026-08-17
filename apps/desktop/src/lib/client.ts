@@ -6,6 +6,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ArxivRankingMode,
+  PaperSearchDepth,
   ArxivSearchRequest,
   ArxivSearchResponse,
   Artifact,
@@ -21,6 +22,7 @@ import type {
   ChatSession,
   ResearchInterest,
   ResearchInterestProfile,
+  ResearchHypothesisCard,
   ResearchInterestHintRequest,
   ResearchInterestHintResponse,
   KnowledgeNote,
@@ -404,9 +406,10 @@ export const paperSearchApi = {
     request: ArxivSearchRequest,
     cutoffDate: string,
     limit = 5,
-    ranking_mode: ArxivRankingMode = "relevance"
+    ranking_mode: ArxivRankingMode = "relevance",
+    search_depth: PaperSearchDepth = "balanced",
   ): Promise<ArxivSearchResponse> =>
-    invoke("paper_search", { request, cutoffDate, limit, rankingMode: ranking_mode }),
+    invoke("paper_search", { request, cutoffDate, limit, rankingMode: ranking_mode, searchDepth: search_depth }),
   saveHistory: (draft_json: string, result_json: string): Promise<PaperSearchHistoryEntry> =>
     invoke("paper_search_save_history", { request: { draft_json, result_json } }),
   getHistory: (limit = 20): Promise<PaperSearchHistoryEntry[]> =>
@@ -437,8 +440,13 @@ export const githubProjectApi = {
 
 export interface ResearchIdeaSuggestion {
   title: string;
+  hypothesis: string;
   rationale: string;
-  background: string;
+  evidence: string[];
+  counter_evidence: string[];
+  falsification: string;
+  validation_steps: string[];
+  uncertainties: string[];
   keywords: string[];
 }
 
@@ -457,9 +465,10 @@ export const knowledgeApi = {
   createInterest: (
     topic: string,
     keywords: string[],
-    profile?: ResearchInterestProfile
+    profile?: ResearchInterestProfile,
+    hypothesisCard?: ResearchHypothesisCard,
   ): Promise<ResearchInterest> =>
-    invoke("knowledge_create_interest", { topic, keywords, profile: profile ?? null }),
+    invoke("knowledge_create_interest", { topic, keywords, profile: profile ?? null, hypothesisCard: hypothesisCard ?? null }),
   createFolder: (name: string, parentId?: string | null): Promise<ResearchInterest> =>
     invoke("knowledge_create_folder", { name, parentId: parentId ?? null }),
   moveInterest: (id: string, parentId: string | null): Promise<ResearchInterest> =>
@@ -486,8 +495,9 @@ export const knowledgeApi = {
   ideasFromMaterials: (
     materials: string,
     images: { data: string; mediaType: string }[],
+    feedback?: string,
   ): Promise<ResearchIdeaSuggestion[]> =>
-    invoke("knowledge_ideas_from_materials", { materials, images }),
+    invoke("knowledge_ideas_from_materials", { materials, images, feedback: feedback ?? null }),
   generatePlan: (id: string, startStep?: number): Promise<void> =>
     invoke("knowledge_generate_plan", { id, startStep: startStep ?? null }),
   listNotes: (search?: string): Promise<KnowledgeNote[]> =>
@@ -732,6 +742,10 @@ export interface MemoryCheckpoint {
   open_questions: string[];
   next_steps: string[];
   status: string;
+  source: string;
+  asset_snapshot: Record<string, unknown>;
+  review_status: "pending" | "confirmed" | "corrected" | "withdrawn";
+  review_note: string;
   created_at: string;
   updated_at: string;
 }
@@ -787,6 +801,8 @@ export const memoryApi = {
     }),
   listCheckpoints: (limit = 8): Promise<MemoryCheckpointListResponse> =>
     invoke("memory_list_checkpoints", { limit }),
+  reviewCheckpoint: (id: string, status: "confirmed" | "corrected" | "withdrawn", note?: string): Promise<void> =>
+    invoke("memory_review_checkpoint", { id, status, note: note ?? null }),
   privacyStatus: (): Promise<MemoryPrivacyStatus> =>
     invoke("memory_privacy_status"),
   setPrivacyPassword: (password: string): Promise<MemoryPrivacyStatus> =>
@@ -911,6 +927,18 @@ export const submissionApi = {
   updateComment: (id: string, params: Partial<{ content: string; response: string; resolved: boolean; tags: string[] }>) =>
     invoke<void>("submission_update_comment", { id, ...Object.fromEntries(Object.entries(params).map(([k, v]) => [k, v ?? null])) }),
   deleteComment: (id: string) => invoke<void>("submission_delete_comment", { id }),
+  upsertReviewFeedback: (params: { submissionId: string; reviewRunId: string; reviewer: string; itemKey: string; suggestion: string; status: "pending" | "adopted" | "ignored" | "done"; reason?: string }) =>
+    invoke<{ ok: boolean }>("submission_upsert_review_feedback", {
+      submissionId: params.submissionId,
+      reviewRunId: params.reviewRunId,
+      reviewer: params.reviewer,
+      itemKey: params.itemKey,
+      suggestion: params.suggestion,
+      status: params.status,
+      reason: params.reason ?? null,
+    }),
+  reviewFeedbackSummary: (submissionId: string) =>
+    invoke<{ counts: Record<"pending" | "adopted" | "ignored" | "done", number> }>("submission_review_feedback_summary", { submissionId }),
 
   getChecklist: (submissionId: string) => invoke<{ checklist: unknown[] }>("submission_get_checklist", { submissionId }),
   toggleChecklist: (itemId: string) => invoke<void>("submission_toggle_checklist", { itemId }),

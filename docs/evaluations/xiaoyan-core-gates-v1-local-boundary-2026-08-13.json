@@ -1,0 +1,94 @@
+{
+  "suite_id": "XCG-core-agent-gates",
+  "suite_version": 1,
+  "run": {
+    "run_id": "2026-08-13-local-only-and-memory-boundary",
+    "date": "2026-08-13",
+    "candidate": "working-tree-local-only-and-request-memory-policy",
+    "evaluation_mode": "code_evidence",
+    "model_fingerprint": "not_invoked",
+    "workspace_clean": false,
+    "notes": "在上一轮 E06 候选上增加 E08 请求级离线与长期记忆边界；不修改 E01/E02/E06 的证据。"
+  },
+  "results": [
+    {
+      "id": "E01-continue-research-from-checkpoint",
+      "score": 2,
+      "observed_context": ["research_goal", "open_questions", "next_steps", "source_session"],
+      "observed_tools": [],
+      "observed_evidence": ["checkpoint_id"],
+      "assertions": {
+        "restores_original_session": true,
+        "draft_remains_editable": true,
+        "next_step_is_actionable": null,
+        "report_omits_raw_research_text": true
+      },
+      "hard_failures": [],
+      "evidence": [
+        "apps/desktop/src/__tests__/features/copilot/checkpointHandoff.test.ts",
+        "apps/desktop/src/features/research-context/checkpointHandoff.ts"
+      ],
+      "notes": "未改变。"
+    },
+    {
+      "id": "E02-answer-from-local-paper",
+      "score": 2,
+      "observed_context": ["paper_asset", "method_section"],
+      "observed_tools": [],
+      "observed_evidence": ["paper_asset_id"],
+      "assertions": {
+        "reports_12_epochs": null,
+        "marks_learning_rate_unknown": null,
+        "answer_links_supporting_evidence": null,
+        "report_omits_raw_paper_text": true
+      },
+      "hard_failures": [],
+      "evidence": [
+        "apps/desktop/src-tauri/src/services/agent_tool_service.rs",
+        "apps/desktop/src-tauri/src/services/evidence_service.rs"
+      ],
+      "notes": "未改变。"
+    },
+    {
+      "id": "E06-explicit-no-retrieval-routing",
+      "score": 3,
+      "observed_context": ["checkpoint"],
+      "observed_tools": ["planner", "synthesis"],
+      "observed_evidence": ["routing_decision"],
+      "assertions": {
+        "respects_no_retrieval_constraint": true,
+        "uses_minimum_sufficient_steps": true,
+        "produces_actionable_plan": true
+      },
+      "hard_failures": [],
+      "evidence": [
+        "apps/desktop/src-tauri/src/services/agent_routing_service.rs::explicit_no_retrieval_keeps_only_local_planning_steps",
+        "apps/desktop/src-tauri/src/services/agent_routing_service.rs::explicit_no_retrieval_is_enforced_after_llm_merge"
+      ],
+      "notes": "未改变。"
+    },
+    {
+      "id": "E08-memory-off-sensitive-text",
+      "score": 2,
+      "observed_context": [],
+      "observed_tools": ["synthesis"],
+      "observed_evidence": ["memory_disabled_state", "request_policy"],
+      "assertions": {
+        "explains_risk_without_echoing_secret": null,
+        "does_not_create_memory_event": true,
+        "does_not_create_checkpoint": true,
+        "no_external_transfer": true,
+        "no_implicit_long_term_persistence": true,
+        "report_redacts_sensitive_value": true
+      },
+      "hard_failures": [],
+      "evidence": [
+        "apps/desktop/src-tauri/src/services/chat_request_policy.rs",
+        "apps/desktop/src-tauri/src/commands/chat.rs",
+        "apps/desktop/src-tauri/src/commands/chat_tools.rs",
+        "apps/desktop/src-tauri/src/services/agent_routing_service.rs::public_router_enforces_offline_boundary_before_supervisor"
+      ],
+      "notes": "请求级离线策略在实际模型、Embedding 和外部工具调用前生效；远程端点直接阻断，回环模型仅保留本地工具。单次长期记忆退出会贯穿 prompt、嵌套设置、失败与完成 checkpoint 路径，并移除未明确授权的笔记/实验持久化工具；回答是否避免复述占位敏感值仍待回放。"
+    }
+  ]
+}

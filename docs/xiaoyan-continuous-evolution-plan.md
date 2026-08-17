@@ -2,11 +2,11 @@
 
 > 文档性质：长期维护的产品、评测与工程总纲
 >
-> 当前版本：`0.2.1`
+> 当前版本：`0.3.11`
 >
 > 建立日期：2026-07-29
 >
-> 最近更新：2026-08-06
+> 最近更新：2026-08-13
 >
 > 当前阶段：阶段 A「建立可信基线」
 >
@@ -31,16 +31,19 @@
 | 北极星指标 | 有效续接率 |
 | 每轮工作上限 | 1 个主假设、1 个端到端切片、最多 2 个辅助工程项 |
 | 每次 Codex 候选必跑 | E01 续接、E02 证据问答、E06 路由、E08 隐私 |
-| 当前首要缺口 | 没有可执行评测集、跨版本基线和持久化模型指纹 |
+| 当前首要缺口 | E02 已用合成全文的确定性回放消除剩余 2 项未知硬失败断言，核心门禁完整通过；E01 的下一步可执行性与 E08 的输出脱敏仍为普通未知断言，尚不能替代人工任务或真实模型回放；Agent 运行缺持久化模型指纹 |
 | 当前不做 | 黑盒自动改代码、无授权主动执行、为了追新模型而大范围重写 |
 | 采用升级的条件 | 核心质量不退化，目标切片有可复现收益，并有对应代码与测试落地 |
 
-最近两个迭代的推进顺序：
+当前推进顺序：
 
 1. `已完成` checkpoint 从工作台显式交接到小妍，恢复原会话并预填可编辑续接请求；
-2. `下一步` 建立 E01、E02、E06、E08 的固定夹具、评分表和首版人工基线；
-3. 持久化 Agent 运行的模型指纹、策略版本、耗时和失败分类；
-4. 将设置页反馈改为结构化类别，并可选关联会话/请求。
+2. `已完成` 建立 E01、E02、E06、E08 的固定合成夹具、三态评分器与首版代码证据基线；
+3. `已完成` 将“不要联网 / 不写入长期记忆”提升为请求级可执行策略，在实际模型、Embedding、外部工具和隐式持久化之前生效；
+4. `已完成` 为 E02 增加可重复的本地论文参数证据抽取、未知项守卫、section locator 和可见来源链接，核心有效均分 `2.25 → 2.5`；
+5. `下一步` 完成 E01 的 5 组配对人工基线，验证 checkpoint 下一步是否真正可执行；
+6. 持久化 Agent 运行的模型指纹、策略版本、耗时和失败分类；
+7. 将设置页反馈改为结构化类别，并可选关联会话/请求。
 
 ## 2. 目标、边界与原则
 
@@ -83,13 +86,14 @@
 | 长期记忆 | 部分具备 | 本地 `memory_events`、`memory_observations`、checkpoint、开关、详情保护和删除入口已存在 | 缺候选记忆、作用域、置信度、过期、纠正与误召回评价 |
 | 用户反馈 | 部分具备 | 设置页支持文字、截图和用户确认附带的诊断日志；后端已有可选 category | 前端未结构化选择类别，反馈未关联会话、请求、模型和评测场景 |
 | 桌面助手 | 已具备主路径 | 流式停止、临时多轮、模型/耗时/Token 展示、本地知识、来源追溯和导入闭环已落地 | 真实 macOS 多屏/权限矩阵、匿名本地指标和部分可访问性仍待验收 |
-| 固定评测 | 未具备 | 本文已有 E01—E10 场景定义 | 没有可执行夹具、数据版本、运行器、基线报告和回归门禁 |
+| 固定评测 | 部分具备 | E01/E02/E06/E08 已有版本化合成夹具、三态断言、隐私硬失败和成对门禁；E08 的无外发/无隐式长期持久化及 E02 的 12 epochs/学习率未报告/section locator 均有确定性代码证据；当前核心均分 2.5、未知硬失败 0，完整门禁通过 | E01 的下一步可执行性与 E08 的输出脱敏仍未回放；合成确定性回放不能替代人工科研任务、开放式模型质量或官方封闭语料评测 |
 
 代码事实入口：
 
 - Agent 运行与上下文：[`agent_runtime_service.rs`](../apps/desktop/src-tauri/src/services/agent_runtime_service.rs)、[`agent_context_service.rs`](../apps/desktop/src-tauri/src/services/agent_context_service.rs)、[`agent_event_service.rs`](../apps/desktop/src-tauri/src/services/agent_event_service.rs)
 - 记忆与 checkpoint：[`memory_checkpoint_service.rs`](../apps/desktop/src-tauri/src/services/memory_checkpoint_service.rs)、[`memory_retrieval_service.rs`](../apps/desktop/src-tauri/src/services/memory_retrieval_service.rs)
 - 工作台续接：[`checkpointOverview.ts`](../apps/desktop/src/features/workbench/checkpointOverview.ts)、[`useResearchContext.ts`](../apps/desktop/src/features/research-context/useResearchContext.ts)
+- 核心门禁：[`xiaoyan-core-gates-v1.json`](./evaluations/xiaoyan-core-gates-v1.json)、[`run_core_gates.py`](../scripts/core-agent-eval/run_core_gates.py)
 - 桌面助手状态：[`0.6.0-development-status.md`](./0.6.0-development-status.md)、[`0.6.0-desktop-assistant-regression.md`](./0.6.0-desktop-assistant-regression.md)
 
 ## 4. 北极星指标与护栏
@@ -478,6 +482,152 @@ scoring_notes: ""
 - 任一时刻只保留一个“下一轮唯一主假设”。
 
 ## 14. 迭代记录
+
+### 2026-08-13 · 本地论文参数证据守卫
+
+- 文档版本：`0.3.11`
+- 小妍版本 / commit：`0.6.0-dev.1` / `587b27fd` 后续工作区，分支 `codex/paper-discovery-enterprise-topic-3`
+- 迭代类型：产品证据链与核心门禁补证；不登记为 Codex 模型升级
+- 主假设：对 epoch/学习率这类窄范围论文参数问题，在全文上执行确定性抽取、未知项标记与章节定位，并阻止后续模型改写，可以消除关键事实编造风险并让用户打开依据
+- OpenCode 参照：沿用“先收窄能力、执行前裁决、结构化结果贯穿后续步骤”的设计取向；具体论文证据实现为小妍自有 service，不复制 OpenCode 代码
+- 评测数据版本：`XCG-core-agent-gates` v1，报告 `2026-08-13-deterministic-paper-fact-evidence`
+- 旧基线：核心有效均分 `2.25`，E02 为 2 分，未知硬失败断言 2 项
+- 新结果：核心有效均分 `2.5`，E02 `2 → 3`，未知硬失败断言 `2 → 0`；无场景退化，完整核心门禁和成对非退化门禁均通过
+- 代码与测试改动：新增 `paper_fact_service`，从合成全文提取训练轮数和学习率并生成 section locator；未知学习率明确标为“论文未报告”；路由只保留 paper_analyst + synthesis，跳过 retrieval/supervisor/Embedding；verified worker 输出绕过模型 synthesis 改写；Copilot 展示可打开的论文来源胶囊
+- 自动验证：E02 service 10 项、路由 11 项、来源 UI 2 项通过；核心门禁对比退出码 0；最终仓库级验证见本轮详细记录
+- 人工验收：合成全文确定性回放已完成；未扩展到 batch size、optimizer 等参数，相关混合问题会安全回退到现有 paper_analyst
+- 隐私与性能护栏：确定性路径不调用模型、联网检索或 Embedding；来源元数据只保存 paper asset ID、标题与 section locator，不复制论文正文；正则误报覆盖调度里程碑、表号、年份和重复数字定位反例
+- 决策：采纳窄范围确定性证据守卫；不将它表述为通用论文问答完成
+- 详细记录：[`2026-08-13-deterministic-paper-facts.md`](./evolution-runs/2026-08-13-deterministic-paper-facts.md)
+- 下一轮唯一主假设：用 5 组相同研究任务做“空白会话 vs checkpoint 续接”配对人工测试，可以判断当前 handoff 是否真正减少重复解释并产出可执行下一步；若多数任务无改善，停止继续扩展 checkpoint 自动化
+
+### 2026-08-13 · 请求级离线与长期记忆边界
+
+- 文档版本：`0.3.10`
+- 小妍版本 / commit：`0.6.0-dev.1` / `587b27fd` 后续工作区，分支 `codex/paper-discovery-enterprise-topic-3`
+- 迭代类型：产品安全边界与核心门禁补证；不登记为 Codex 模型升级
+- 主假设：把用户的“不要联网 / 不写入长期记忆”从路由提示提升为请求级策略，并在实际模型、Embedding、工具与持久化之前统一执行，可以消除仅收窄 Agent 路由仍可能外发或隐式写入的缺口
+- OpenCode 参照：vendored OpenCode 的 fetch 在 HTTP 请求前申请权限，write/edit 在修改前检查权限；小妍借鉴“副作用前统一裁决、执行层再防御”的顺序，不复制实现或权限模型
+- 评测数据版本：`XCG-core-agent-gates` v1，报告 `2026-08-13-local-only-and-memory-boundary`
+- 旧基线：代码证据均分 `2.25`，未知硬失败断言 3 项，其中 E08 的 `no_external_transfer` 未验证
+- 新结果：均分保持 `2.25`，未知硬失败断言 `3 → 2`，已补证 E08 `no_external_transfer`；无场景退化、成对非退化门禁通过，完整门禁仍因 E02 两项未知硬失败断言未通过
+- 代码与测试改动：新增 `ChatRequestPolicy` service；离线请求仅允许回环模型，跳过独立 Embedding 与后台向量回填，收窄并二次阻断外部工具；单次记忆退出贯穿 prompt、失败、完成与 checkpoint，并关闭未明确授权的笔记/实验持久化工具
+- 自动验证：Rust 全库 `171` 项通过、`4` 项忽略；核心门禁评分器 `8` 项通过；仓库级 `pnpm type-check` 通过；`pnpm lint` 0 error、18 个既有 warning；`cargo fmt --check` 与 `git diff --check` 通过
+- 人工验收：尚未运行真实模型输出回放；E08 的“解释风险且不复述敏感值”保持 `null`，不宣称输出脱敏已验证
+- 隐私与性能护栏：远程主模型或视觉模型在实际调用前被阻断；离线请求不调用独立 Embedding 或联网/嵌套模型工具；普通聊天作为用户主动创建的本地产品资产与长期记忆区分；用户明确要求保存为笔记/实验时仍视为单独授权
+- 决策：采纳请求级策略与纵深防御；完整核心门禁继续观察，不作为模型采纳或发布放行结论
+- 详细记录：[`2026-08-13-request-local-only-policy.md`](./evolution-runs/2026-08-13-request-local-only-policy.md)
+- 下一轮唯一主假设：在不把论文正文复制进评测报告的前提下，为 E02 增加可重复的本地论文参数证据抽取和端到端回放，可以同时验证“12 epochs”“学习率未报告”和 section locator，并消除剩余 2 项未知硬失败断言
+
+### 2026-08-13 · 核心 Agent 门禁与显式检索边界
+
+- 文档版本：`0.3.9`
+- 小妍版本 / commit：`0.6.0-dev.1` / `587b27fd` 后续工作区，分支 `codex/paper-discovery-enterprise-topic-3`
+- 迭代类型：评测基础设施与产品改进；不登记为 Codex 模型升级
+- 主假设：版本化核心门禁可以发现并阻止用户明确只用当前材料时仍启动外部研究步骤的路由回归
+- OpenCode 参照：借鉴任务工具收窄、会话状态和结构化事件契约；不复制代码，不扩大权限
+- 评测数据版本：`XCG-core-agent-gates` v1，E01/E02/E06/E08 合成夹具
+- 旧基线：代码证据均分 `1.75`；E06 因无条件加入 retrieval、literature_scout、survey 仅 1 分
+- 新结果：候选均分 `2.25`；E06 为 planner + synthesis，`1 → 3`；其余三项持平、已观察硬失败为 0
+- 代码与测试改动：新增三态评分器、基线/候选报告和门禁脚本；规则、Hybrid、LLM 路由统一遵守显式检索边界，并保留“排除博客但仍检索论文”的反例
+- 自动验证：Rust 路由 8 项、评分器 7 项、checkpoint 前端 8 项通过；成对非退化检查、仓库级 type-check、cargo fmt、py_compile、diff check 通过；完整核心门禁因未知硬失败断言按预期返回 3；lint 0 error、18 个既有 warning
+- 决策：采纳门禁与路由改进；E01/E02/E08 的未回放断言保留为 `null`，有效分不超过 2，完整核心门禁保持未通过，不宣称真实质量已验证
+- 详细记录：[`2026-08-13-core-agent-gates-and-routing.md`](./evolution-runs/2026-08-13-core-agent-gates-and-routing.md)
+- 下一轮唯一主假设：为 E01/E02/E08 增加可重复模型/人工回放，将未验证断言转为证据，并完成 E01 的 5 组配对人工基线
+
+### 2026-08-11 · LitSearch 适用性审计与排序实验回退
+
+- 文档版本：`0.3.8`
+- 小妍版本 / commit：`0.6.0-dev.1` / 当前工作区，分支 `codex/paper-discovery-enterprise-topic-3`
+- 迭代类型：评测适用性审计、诊断增强与回退；不登记为 Codex 模型升级
+- 主假设：候选级归因可以判断低分来自外部召回还是内部排序，并阻止在不合适的开放世界 gold 上继续盲调
+- 评测边界：LitSearch 官方将 query/gold 与封闭论文 corpus 配套评测；小妍当前在实时 Semantic Scholar 开放全库上运行，只能把 gold 当作已知目标，开放世界 Precision/F1 不具备官方可比性
+- 诊断结果：Quick-80 候选/Top-20 均命中 `83 / 100`，排序损失 0、召回缺失 17；分层 80 候选命中 `31 / 91`、Top-20 命中 `28 / 91`，排序损失 3、召回缺失 60
+- 被拒绝实验：摘要覆盖与连字符匹配使分层集 Top-20 增加 1 个 gold，但 Quick-80 从 `83 / 100` 退化为 `78 / 100`，5 个 case 退化；成对门禁失败并返回退出码 3，代码已撤回
+- 恢复证据：撤回后 Quick-80 严格离线回到 `83 / 100`，Recall@5/10/20 为 `0.74 / 0.77 / 0.83`，排序损失重新为 0
+- 代码与测试改动：仅在 Rust 测试构建响应中输出完整启发式候选身份、排名、分数和来源；LitSearch 报告记录每个 gold 的候选/最终排名及来源，并聚合候选召回、排序损失和召回缺失；正式产品响应契约不增加诊断字段
+- 决策：采纳候选诊断；拒绝排序改动；停止继续针对当前 LitSearch 开放世界改编调参并取消 holdout 联网计划。未来只在官方封闭 corpus 或多学科、中英文、人工相关性/任务完成度评测建立后重启质量优化
+- 杀停标准是否触发：是；局部切片收益伴随固定 Quick 基线明显退化，且当前评测口径不足以支持产品级质量结论
+- 下一轮唯一主假设：回到阶段 A 主线，建立 E01、E02、E06、E08 的固定夹具、评分表和首版人工基线
+
+### 2026-08-11 · 未触碰门禁规划与成对成本评测
+
+- 文档版本：`0.3.7`
+- 小妍版本 / commit：`0.6.0-dev.1` / 当前工作区，分支 `codex/paper-discovery-enterprise-topic-3`
+- 迭代类型：评测基础设施与离线门禁；不登记为 Codex 模型升级
+- 主假设：在 holdout 联网运行前先锁定查询规划与成对比较口径，可以防止后续因样本、gold、Top-K 或缓存范围不同而制造虚假提升
+- 评测数据版本：LitSearch revision `cf3021a3bd442c7c334dca78b9c8b7da170c6a1b`；holdout seed `20260810`，排除 148 个已观察 case，新选 80 条，与旧两套切片零重叠
+- 离线规划结果：80 条无空计划、无重复检索式；79/79 条长查询全部压缩，首查询平均 `5.2125` 词，P95/最大值均为 `8`
+- 成对比较证据：既有 12 条 Balanced 相对 Quick 改善 `7 / 12`、退化 `0 / 12`，净增 7 个 gold；5 个来自纯 `full_text_snippet`，2 个来自 `search+full_text_snippet`
+- 成本消融：Balanced 关闭引文扩展、只保留正文片段后，12/12 case 的 Top-20 不变，Top-5 增加 1 个命中；调用从 78 降至 54（`-30.8%`），P50 从 27 ms 降至 15 ms。相对 Quick 总计只增加 30 次调用，即每 case `2.5` 次、每净新增 gold `4.29` 次
+- 代码与测试改动：规划评测支持 `--case-manifest` 且保持清单顺序；成对比较器强制核对 case、query、gold、截止日期和 Top-K，显式区分源报告缓存范围；Balanced 聚焦正文片段、Deep 保留引文网络；前端类型与来源徽标支持 `full_text_search` / `full_text_snippet`，不再误标为参考文献；Python 评测测试增至 12 项，Rust 新增 2 项清单筛选测试
+- 可执行门禁：成对运行器保证 Quick/Balanced 共用完全相同的 manifest 切片和参数，自动生成三份报告；默认要求 Recall@20 增量 ≥`0.10`、净新增 gold ≥1、退化 case=0、每净新增 gold 调用 ≤6、两侧 error/partial failure=0。当前 12 条全部通过；成本上限改为 4 时按预期失败并返回退出码 3
+- Quick 非退化：固定前 80 条仍命中 `83 / 100`，Recall@20 `0.83`、Recall@5 `0.74`，160/160 响应命中缓存
+- 自动验证：Rust `147` 项通过、`4` 项忽略；Desktop Vitest `82` 个文件、`309` 项通过；跨工作区 `pnpm type-check` 通过；`pnpm lint` 0 error、18 个既有 warning；Python 12 项测试、全部脚本 `py_compile`、`cargo fmt --check` 与 `git diff --check` 通过；成对运行器在既有 12 条上离线端到端通过
+- 决策：采用成对比较器作为后续 Quick/Balanced 门禁入口；采纳 Balanced 关闭引文、Deep 保留引文的分层预算；不把源报告全量缓存统计错误归因到成对子集
+- 未解决风险：当前联网额度尚未恢复，3 条旧次查询缓存和 holdout 检索结果仍缺；已有 12 条用于工具验证但不能替代未触碰泛化证据
+- 下一轮唯一主假设：额度恢复后先补齐 3 条旧缓存，再执行已 dry-run 的 holdout batch-1；只有默认门禁全部通过，才继续下一个 12 条批次，不根据 holdout gold 增加标题规则
+
+### 2026-08-09 · LitSearch 固定切片扩展与检索质量迭代
+
+- 文档版本：`0.3.4`
+- 小妍版本 / commit：`0.6.0-dev.1` / 当前工作区，分支 `codex/paper-discovery-enterprise-topic-3`
+- 迭代类型：产品改进与评测基础设施；不登记为 Codex 模型升级
+- 主假设：把自然语言任务描述映射为论文标题常用术语，并让真正互补的检索式获得独立标题覆盖奖励，可在不增加 Quick API 预算的前提下改善复杂学术查询召回
+- 评测数据版本：LitSearch query revision `cf3021a3bd442c7c334dca78b9c8b7da170c6a1b`，固定前 80 条、100 个 gold；gold 元数据 574 条、572 条成功解析，SHA-256 `9b978119851fe6b91c122229c30b7616e10dfc5e87dd5277cc0109edb6a37753`
+- 旧基线：固定前 5 条 Quick 命中 `2 / 7`，Recall@20 `0.2857`、Precision@20 `0.0244`、F1@20 `0.0449`
+- 新结果：固定前 80 条 Quick 扩容基线为 `57 / 100`，摘要字段修复后为 `83 / 100`，Recall@5 `0.74`、Recall@10 `0.77`、Recall@20 `0.83`、Precision@20 `0.0527`、F1@20 `0.0991`；其中前 40 条保持 `42 / 53`
+- 能力差异：方言阿拉伯语两篇 gold 提升至第 3、4 名；TinyBERT、FEVER、fastText、MiniLMv2、QDMR、CrossWeigh、Sentence-BERT 等描述型请求均进入 Quick Top-20；SRL 旧共享任务由 Quick `1 / 3` 提升到 Deep `2 / 3`
+- 稳定性改动：缓存只保存已成功解析响应；关系 API 容忍 `data: null` 与不完整论文记录；429 重试尊重 `Retry-After`；规范 paper ID 与 Corpus ID 别名均可计分；gold 检查默认严格离线；论文、全文详情与引文响应显式保留 Semantic Scholar `abstract` 字段
+- 全文召回改动：Balanced/Deep 新增 Semantic Scholar 正文片段检索与 batch 详情补全，片段只作为内部召回信号；重复论文合并全文得分/片段而不覆盖正式摘要。`litsearch-0449` 由 Top-20 外升至第 4 名
+- 成本：Quick 仍为每条 2 次逻辑学术 API 调用、无全文或引文扩展；最终 Quick-80 严格离线回放 160 次缓存命中，墙钟 930 ms。Balanced 固定 12 条共 78 次逻辑学术调用；严格离线 P50/P95 27/73 ms、墙钟 417 ms，两条首次补缓存请求约 14/23 秒
+- 自动验证：Rust `145` 项通过、`4` 项忽略；Desktop Vitest `81` 个文件、`308` 项通过；跨工作区 `pnpm type-check` 通过；`pnpm lint` 0 error、18 个既有 warning；Python 评测生成器 3 项测试及全部脚本 `py_compile`、`cargo fmt --check`、`git diff --check` 通过
+- 决策：采纳有固定切片证据支持的查询扩展、互补意图排序和关系容错；不为 SRL 剩余单篇 gold 硬编码完整标题，优先验证二跳引文或第二学术数据源
+- 分层门禁结果：seed `20260809` 的固定 80 条清单覆盖 4 个 query set 和 16 个 `query_set × specificity × quality` 组合；80 个 case 均严格离线完成，但 160 条逻辑查询为 157 cache hit / 3 miss，缺失的次查询由同 case 另一条成功查询降级。Quick 命中 `28 / 91`、Recall@20 `0.3077`；`inline_acl` 为 `13 / 21`，`inline_nonacl` `8 / 36`，`manual_acl` `5 / 20`，`manual_iclr` `2 / 14`。specificity 两组为 `0.2903 / 0.3167`，quality 两组为 `0.2791 / 0.3333`，主差距来自 query source
+- 全文召回证据：独立 snippet probe 的 11 个成功响应命中 8 个；产品级 Balanced 在固定分层第 61—72 条命中 `8 / 12`，Recall@10/20 `0.6667`，而 Quick 同批仅 `1 / 12`。8 个 gold 全部带 `full_text_snippet` 来源，最终严格离线回放无 partial failure
+- 新门禁：seed `20260810` 的 holdout 排除 Quick 前 80 条和当前分层清单的并集 148 条，新选 80 条与旧切片零重叠且重复生成字节一致；排除后一个 5 条分层耗尽，清单显式记录空层并覆盖其余 15 个组合。当前未检查 gold、未运行检索
+- 智能路径证据：显式本地 LLM 单例产生 2 次调用与 7591 估算 Token，但唯一 `openai_compatible` 配置返回 401；已实现论文专用模型失败后运行时回退主模型，本机无第二可用端点，暂不宣称智能规划提升
+- 未解决风险：Semantic Scholar 单源对描述型旧论文、多 gold 查询和异常 gold 仍会漏召回；全文检索改善人工查询但增加两次 API 调用并受 429/尾延迟影响；分层样本已用于失败分析，后续代码改动必须保留新的未触碰门禁
+- 下一轮唯一主假设：在新的未触碰分层切片上比较“Balanced 全文召回”和“第二学术数据源/可用语义规划端点”的边际 Recall、P95 与调用成本；不继续针对已观察 gold 扩充标题规则，也不把全文成本下放到 Quick
+
+### 2026-08-06 · LitSearch 数据接入与查询规划全量回归
+
+- 文档版本：`0.2.3`
+- 小妍版本 / commit：`0.6.0-dev.1` / 当前工作区，分支 `codex/paper-discovery-enterprise-topic-3`
+- 迭代类型：产品改进与评测基础设施；不登记为 Codex 模型升级
+- 主假设：先用短核心检索式提高候选召回，再用细节检索式保持约束覆盖；排序时对核心查询的标题完整命中加权，可以改善复杂问句下的召回与前排精度
+- 评测数据版本：LitSearch query parquet，官方 revision `cf3021a3bd442c7c334dca78b9c8b7da170c6a1b`，SHA-256 `38cdbe4a6b7a7f5776d08055bfbf6e4511000aa2a523866592b4bb273388b914`，597 条
+- 旧基线：3 条联网烟雾样例命中 `1 / 4` 个 gold，Recall@20 `0.25`、Precision@20 `0.0167`、F1@20 `0.03125`；TinyBERT 仅在深度引文扩展中找回，突尼斯阿拉伯语资源样例未找回
+- 本轮改动：新增可校验的数据准备脚本、离线/联网评测入口、gold 诊断工具和数据清单；长问题生成短核心查询与细节查询；规划与启发式排序复用停用词和词形规范化；标题完整覆盖核心查询获得显式加权
+- 离线结果：597 条均生成非空且无重复的计划；596 条超过 8 词的长问题全部被压缩；首查询平均 `5.08` 词，P95 与最大值均为 `8`；固定候选测试中，标题完整匹配的低引用目标排在高引用但部分匹配的候选之前
+- 联网结果：此前小样本报告已落盘；本轮核心查询复测因 Codex 网络额度限制未能访问 Semantic Scholar，失败报告保留，不能据此宣称 Recall/F1 提升或退化
+- 数据授权：LitSearch 已合法下载并校验；PaSa RealScholarQuery 与 AstaBench PaperFindingBench 均为 Hugging Face gated 数据，等待用户接受条款，不绕过授权
+- 自动验证：论文搜索 Rust 测试 `15` 项通过、`2` 项专项评测按设计忽略；Rust 全库 `122` 项通过、`4` 项手动/专项测试忽略；Desktop Vitest `81` 个文件、`308` 项通过；跨工作区 `pnpm type-check` 通过，`pnpm lint` 0 error（18 个既有 warning）；全量离线 LitSearch 规划评测通过
+- 决策：采纳离线可复现的规划与排序改进；联网质量结论继续观察，网络恢复后先复跑样例 1，再扩到固定 20 条和全量分层切片
+- 未解决风险：Semantic Scholar 单源召回、API 限流、启发式词形归一化和摘要级排序仍可能漏掉隐式同义表达；当前 F1 只来自 3 条烟雾样例
+- 下一轮唯一主假设：网络恢复后，短核心查询能使 `litsearch-0001` 的目标 Corpus ID `227231792` 进入前 20，并在固定 20 条切片上提高 Recall@20，且 API 调用预算不增加
+
+### 2026-08-06 · 企业赛题三论文智能搜索管线
+
+- 文档版本：`0.2.2`
+- 小妍版本 / commit：`0.6.0-dev.1` / `7a5dffc2` 后续工作区，分支 `codex/paper-discovery-enterprise-topic-3`
+- 迭代类型：产品改进与关键 Agent 能力补强；这是用户指定的补充切片，不替代阶段 A 的 checkpoint 唯一主线
+- 主假设：将结构化意图、硬预算、引文扩展、质量过滤、相关性分层和成本轨迹统一进论文搜索契约，可以补足复杂学术查询的可解释性和恢复能力
+- Codex 模型指纹：当前会话未提供可验证的精确构建号，不登记为一次模型升级
+- 评测数据版本：`paper-search-v1`（PS01—PS05 合成固定夹具）；网络检索 F1 数据集尚未接入
+- 旧基线：2—4 条查询拆分、Semantic Scholar 多查询合并、启发式/可选 LLM 重排和列表展示，契约覆盖分 `7 / 20`
+- 新结果：新增快/均衡/深度预算，返回研究概念、方法、数据集、领域、刊会和时间约束；均衡/深度模式可沿参考文献与引用论文扩展；展示高/部分相关、命中子查询、检索步骤、论文关系和 API/Token/耗时指标
+- 能力差异：PS01—PS05 的结构断言均由自动测试覆盖，契约覆盖分提升到 `19 / 20`；真实公开/隐藏集 F1 与端到端联网成本仍未知
+- 目标切片：工具页复杂问题 → 选择成本档位 → Semantic Scholar 检索与引文扩展 → 综合排序 → 检查意图、关系、相关性和成本
+- 文档改动：新增赛题要求矩阵、固定评测、基线/迭代记录，并同步 README 与更新日志
+- 代码与测试改动：Rust 检索规划、策略和排序分层；前端远程编排从 hook 抽离；新增预算控制、策略摘要、关系视图以及降级、预算、分层测试
+- 自动验证：Rust `117` 项通过、`2` 项手动联网测试忽略；Desktop Vitest `81` 个文件、`308` 项全部通过；跨工作区 `pnpm type-check` 通过；`pnpm lint` 0 error，仅保留既有 warning；`git diff --check` 通过
+- 人工验收：Playwright 驱动系统 Chrome 检查工具页，三档预算可操作，桌面 `1440×1000` 与平板 `768×1024` 均无横向溢出；普通 Vite 环境没有 Tauri bridge，因此真实联网结果仍需在桌面壳内复核
+- 隐私与性能护栏：不新增遥测；快速模式最多 2 次首轮学术查询且不扩展引文，均衡/深度模式按种子数与每种关系结果数设置硬上限；单接口或 LLM 失败保留既有候选并记录部分失败
+- 决策：采纳结构性改进，联网质量继续观察；没有 F1 证据前不宣称达到赛题质量目标
+- 杀停标准是否触发：未触发；相关性降级、快速模式失控和扩展失败丢失首轮结果均有回归测试保护
+- 未解决风险：尚未接入 PaSa/AstaBench 或赛题公开集，当前只基于题目要求和合成夹具；只接入一个学术数据源；摘要级排序不能替代全文级证据匹配
+- 下一轮唯一主假设：仍保持阶段 A 主线——版本化核心门禁夹具能在不接触真实私密材料的前提下复现最重要的质量与隐私回归
 
 ### 2026-08-06 · checkpoint 直接续接到小妍
 

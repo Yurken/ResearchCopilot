@@ -4,6 +4,10 @@ use crate::llm::{
     resolve_model, resolve_temperature, resolve_temperature_chain, LlmClient, LlmMessage,
 };
 use crate::rag::combined_search;
+use crate::services::chat_request_policy::ChatRequestPolicy;
+use crate::services::paper_fact_service::{
+    answer_supported_paper_fact_question, verified_worker_output,
+};
 use crate::text_utils::truncate_chars_with_ellipsis;
 use anyhow::Result;
 use sqlx::Row;
@@ -29,6 +33,9 @@ pub async fn execute_agent_node(
         "retrieval" => retrieval_context(client, db, settings, message).await,
         "paper_analyst" => {
             let text = paper_text(db, context_id).await;
+            if let Some(answer) = answer_supported_paper_fact_question(message, &text) {
+                return Ok(verified_worker_output(&answer));
+            }
             let preview = truncate_chars_with_ellipsis(&text, 8000);
             let prompt = format!(
                 "请基于以下论文内容回答用户问题，结论应客观、准确、可追溯。\n\n\
@@ -207,15 +214,20 @@ async fn retrieval_context(
     settings: &HashMap<String, String>,
     message: &str,
 ) -> Result<String> {
-    let embedding = if let Ok(embed_client) = LlmClient::embed_client_from_settings(settings) {
-        match embed_client.embed(&[message.to_string()]).await {
-            Ok(embeddings) => embeddings.into_iter().next(),
-            Err(error) => {
-                crate::append_diagnostic_log(&format!(
+    let request_policy = ChatRequestPolicy::from_message(message);
+    let embedding = if request_policy.allows_embedding() {
+        if let Ok(embed_client) = LlmClient::embed_client_from_settings(settings) {
+            match embed_client.embed(&[message.to_string()]).await {
+                Ok(embeddings) => embeddings.into_iter().next(),
+                Err(error) => {
+                    crate::append_diagnostic_log(&format!(
                     "[agent:retrieval] embedding unavailable, fallback to keyword-only retrieval: {error}"
                 ));
-                None
+                    None
+                }
             }
+        } else {
+            None
         }
     } else {
         None

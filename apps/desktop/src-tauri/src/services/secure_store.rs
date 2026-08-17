@@ -43,12 +43,16 @@ pub fn save(creds: &SyncCredentials) -> Result<(), String> {
     entry()?
         .set_password(&json)
         .map_err(|e| format!("写入钥匙串失败: {e}"))?;
-    *cache().lock().map_err(|e| format!("凭据缓存锁定失败: {e}"))? = Some(Some(creds.clone()));
+    *cache()
+        .lock()
+        .map_err(|e| format!("凭据缓存锁定失败: {e}"))? = Some(Some(creds.clone()));
     Ok(())
 }
 
 pub fn load() -> Result<Option<SyncCredentials>, String> {
-    let mut cache = cache().lock().map_err(|e| format!("凭据缓存锁定失败: {e}"))?;
+    let mut cache = cache()
+        .lock()
+        .map_err(|e| format!("凭据缓存锁定失败: {e}"))?;
     if let Some(cached) = cache.as_ref() {
         return Ok(cached.clone());
     }

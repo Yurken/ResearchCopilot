@@ -1,0 +1,51 @@
+{
+  "suite_id": "PS01-complex-academic-search",
+  "version": 1,
+  "fixture_type": "synthetic",
+  "source_benchmarks": ["LitSearch", "PaSa", "AstaBench"],
+  "scenarios": [
+    {
+      "id": "PS01-compositional-constraints",
+      "user_input": "查找 2020 年以前使用分层神经模型捕获手语视频时空特征的论文，排除纯姿态估计，并优先 CVPR 或 ICCV。",
+      "expected_intent_facets": ["hierarchical neural model", "sign language video", "spatiotemporal feature", "before 2020", "CVPR", "ICCV"],
+      "expected_strategy": ["query_plan", "academic_search", "quality_filter", "rerank"],
+      "assertions": ["至少生成两条互补子查询", "排除词不得出现在最终高相关结果中", "最终结果区分高度相关与部分相关"]
+    },
+    {
+      "id": "PS02-method-dataset-venue",
+      "user_input": "找使用 LoRA 在 MIMIC-CXR 上适配视觉语言模型并发表于医学影像期刊的研究。",
+      "expected_intent_facets": ["LoRA", "MIMIC-CXR", "vision-language model", "medical imaging journal"],
+      "expected_strategy": ["query_plan", "academic_search", "quality_filter", "rerank"],
+      "assertions": ["方法、数据集、任务与 venue 约束可检查", "排序理由说明命中的约束"]
+    },
+    {
+      "id": "PS03-citation-expansion",
+      "user_input": "从 PaSa 出发，找到复杂学术搜索中查询演化和引文探索方向的后续或相关工作。",
+      "expected_intent_facets": ["PaSa", "academic search", "query evolution", "citation exploration"],
+      "expected_strategy": ["query_plan", "academic_search", "citation_expand", "rerank"],
+      "assertions": ["至少记录一轮由种子论文触发的引文扩展", "输出论文间关系边", "扩展失败时保留首轮结果"]
+    },
+    {
+      "id": "PS04-low-quality-filter",
+      "user_input": "检索可信的 agentic literature review 评测论文，排除博客、课程作业和无摘要记录。",
+      "expected_intent_facets": ["agentic literature review", "evaluation", "exclude blog", "exclude coursework"],
+      "expected_strategy": ["query_plan", "academic_search", "quality_filter", "rerank"],
+      "assertions": ["低质量过滤数量可见", "无标题或无摘要且无引用信号的记录不能进入高相关结果"]
+    },
+    {
+      "id": "PS05-budget-control",
+      "user_input": "快速找 5 篇检索增强生成综述。",
+      "expected_intent_facets": ["retrieval-augmented generation", "survey"],
+      "expected_strategy": ["query_plan", "academic_search", "quality_filter", "rerank"],
+      "assertions": ["快速模式不执行引文扩展", "返回 API 调用数、LLM 调用数、估算 Token 与端到端耗时"]
+    }
+  ],
+  "scoring": {
+    "intent_and_decomposition": 20,
+    "iterative_retrieval": 25,
+    "ranking_and_filtering": 25,
+    "structured_output": 15,
+    "cost_and_recovery": 15
+  },
+  "privacy_assertions": ["夹具不包含真实用户论文或检索历史", "评测报告不记录 API Key"]
+}

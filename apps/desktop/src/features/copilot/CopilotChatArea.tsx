@@ -13,6 +13,7 @@ import { MAIN_ASSISTANT_WELCOME_DESCRIPTION, MAIN_ASSISTANT_WELCOME_DESCRIPTION_
 import ThinkingProcessPanel from "./ThinkingProcessPanel";
 import { ToolActionCard } from "./ToolActionCard";
 import { ArtifactCard } from "../artifacts/ArtifactCard";
+import { CopilotSourceLinks } from "./CopilotSourceLinks";
 import appLogo from "../../assets/xiaoyanv.svg";
 import { parseCopilotMessageContent } from "./shared";
 import { openLink } from "../../lib/links";
@@ -181,6 +182,7 @@ export function CopilotChatArea(props: CopilotChatAreaProps) {
                     ))}
                   </div>
                 )}
+                <CopilotSourceLinks sources={message.sources} />
                 {parsed.answer && (
                   <div className="flex items-center gap-0.5 mt-1">
                     <button type="button" onClick={() => onCopy(parsed.answer, message.id)}

@@ -17,6 +17,8 @@ pub mod github_project;
 pub mod journal;
 pub mod knowledge;
 pub mod knowledge_graph;
+pub mod knowledge_hypothesis;
+pub mod knowledge_ideas;
 pub mod knowledge_notes;
 pub mod knowledge_plan_status;
 pub mod memory;
@@ -32,7 +34,16 @@ pub mod paper_figure_pages;
 pub mod paper_figures;
 pub mod paper_notes;
 pub mod paper_search;
+#[cfg(test)]
+mod paper_search_live_eval;
 mod paper_search_plan;
+#[cfg(test)]
+mod paper_search_plan_eval;
+mod paper_search_query_expansion;
+mod paper_search_ranking;
+mod paper_search_response_cache;
+mod paper_search_snippets;
+mod paper_search_strategy;
 pub mod paper_text;
 pub mod papers;
 pub mod research_context;

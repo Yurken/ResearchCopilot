@@ -207,8 +207,7 @@ fn build_anthropic_messages_url(base_url: &str) -> String {
 pub(crate) fn anthropic_auth_header(base_url: &str, api_key: &str) -> (&'static str, String) {
     let lower = base_url.to_ascii_lowercase();
     let use_x_api_key = lower.contains("api.anthropic.com")
-        || (lower.contains("api.kimi.com/coding")
-            && !lower.trim_end_matches('/').ends_with("/v1"));
+        || (lower.contains("api.kimi.com/coding") && !lower.trim_end_matches('/').ends_with("/v1"));
     if use_x_api_key {
         ("x-api-key", api_key.to_string())
     } else {
@@ -217,6 +216,12 @@ pub(crate) fn anthropic_auth_header(base_url: &str, api_key: &str) -> (&'static 
 }
 
 impl LlmClient {
+    pub fn base_url(&self) -> &str {
+        match self {
+            Self::OpenAI { base_url, .. } | Self::Anthropic { base_url, .. } => base_url,
+        }
+    }
+
     pub fn from_settings(s: &HashMap<String, String>) -> Result<Self> {
         let provider = s
             .get("llm_provider")
@@ -420,10 +425,7 @@ impl LlmClient {
                     .get(model_key)
                     .map(|value| value.trim())
                     .unwrap_or_default();
-                return Ok((
-                    Self::build_scoped_client(base_url, api_key, model)?,
-                    true,
-                ));
+                return Ok((Self::build_scoped_client(base_url, api_key, model)?, true));
             }
         }
         Ok((Self::from_settings(s)?, false))
@@ -521,6 +523,36 @@ impl LlmClient {
             resolve_model(s, &["copilot_simple_model"])
         };
         Ok((client, model))
+    }
+
+    /// Resolve the dedicated literature client and a runtime fallback client.
+    ///
+    /// A configured scout endpoint can become unavailable or retain an expired key.
+    /// In that case callers may retry once with Xiaoyan's main role instead of
+    /// dropping immediately to deterministic local behavior.
+    pub fn literature_clients_with_runtime_fallback(
+        s: &HashMap<String, String>,
+    ) -> Result<Vec<(Self, Option<String>)>> {
+        let primary = Self::literature_client_with_main_fallback(s)?;
+        let dedicated_configured = [
+            "multi_agent_literature_scout_base_url",
+            "multi_agent_literature_scout_api_key",
+        ]
+        .iter()
+        .all(|key| s.get(*key).is_some_and(|value| !value.trim().is_empty()));
+        if !dedicated_configured {
+            return Ok(vec![primary]);
+        }
+
+        let mut fallback_settings = s.clone();
+        fallback_settings.remove("multi_agent_literature_scout_base_url");
+        fallback_settings.remove("multi_agent_literature_scout_api_key");
+        fallback_settings.remove("multi_agent_literature_scout_model");
+        let mut clients = vec![primary];
+        if let Ok(fallback) = Self::literature_client_with_main_fallback(&fallback_settings) {
+            clients.push(fallback);
+        }
+        Ok(clients)
     }
 
     /// Vision chat — send one image + text prompt to a multimodal model.

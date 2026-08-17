@@ -44,7 +44,7 @@ function previewText(value: string, maxLength: number): string {
 }
 
 function latestCheckpoint(checkpoints: WorkbenchCheckpointItem[]): WorkbenchCheckpointItem | undefined {
-  return [...checkpoints].sort(
+  return checkpoints.filter((checkpoint) => checkpoint.reviewStatus !== "withdrawn").sort(
     (left, right) => toTimestamp(right.updatedAt || right.createdAt) - toTimestamp(left.updatedAt || left.createdAt),
   )[0];
 }
@@ -61,6 +61,10 @@ function checkpointAction(checkpoint: WorkbenchCheckpointItem): WorkbenchLinkAct
     openQuestions: checkpoint.openQuestions,
     nextSteps: checkpoint.nextSteps,
     status: checkpoint.status,
+    source: checkpoint.source ?? "chat",
+    assetSnapshot: checkpoint.assetSnapshot ?? {},
+    reviewStatus: checkpoint.reviewStatus ?? "pending",
+    reviewNote: checkpoint.reviewNote ?? "",
     updatedAt: checkpoint.updatedAt || checkpoint.createdAt,
   });
 
@@ -101,7 +105,9 @@ export function summarizeInterestCheckpoints(
 }
 
 export function hasActionableCheckpoint(checkpoints: WorkbenchCheckpointItem[]): boolean {
-  return checkpoints.some((checkpoint) => actionableText(checkpoint).trim().length > 0);
+  return checkpoints.some(
+    (checkpoint) => checkpoint.reviewStatus !== "withdrawn" && actionableText(checkpoint).trim().length > 0,
+  );
 }
 
 export function buildCheckpointAgendaItem(

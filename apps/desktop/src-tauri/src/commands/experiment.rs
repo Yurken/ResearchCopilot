@@ -1,3 +1,6 @@
+use crate::services::memory_checkpoint_service::{
+    experiment_asset_snapshot, record_research_asset_checkpoint, ResearchAssetCheckpointInput,
+};
 use crate::state::AppState;
 use base64::{engine::general_purpose, Engine as _};
 use serde_json::json;
@@ -89,8 +92,10 @@ pub async fn create_experiment_core(
 ) -> Result<serde_json::Value, String> {
     let id = Uuid::new_v4().to_string();
     let ts = now();
-    let config_json =
-        serde_json::to_string(&config.unwrap_or_else(|| json!({}))).unwrap_or_else(|_| "{}".into());
+    let config_value = config.unwrap_or_else(|| json!({}));
+    let config_json = serde_json::to_string(&config_value).unwrap_or_else(|_| "{}".into());
+    let result_value = result.unwrap_or_default();
+    let notes_value = notes.unwrap_or_default();
     sqlx::query(
         "INSERT INTO experiment_records (id, title, config, result, notes, linked_submission_id, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -98,14 +103,35 @@ pub async fn create_experiment_core(
     .bind(&id)
     .bind(&title)
     .bind(&config_json)
-    .bind(result.as_deref().unwrap_or(""))
-    .bind(notes.as_deref().unwrap_or(""))
+    .bind(&result_value)
+    .bind(&notes_value)
     .bind(linked_submission_id.as_deref())
     .bind(&ts)
     .bind(&ts)
     .execute(db)
     .await
     .map_err(|e| e.to_string())?;
+
+    let _ = record_research_asset_checkpoint(
+        db,
+        ResearchAssetCheckpointInput {
+            context_type: "experiment",
+            context_id: &id,
+            action: "experiment.created",
+            goal: &title,
+            summary: "已创建实验记录，等待补充配置、结果和判定。",
+            completed_items: vec!["建立实验记录。".to_string()],
+            open_questions: vec!["实验判定指标与停止条件是否已经明确？".to_string()],
+            next_steps: vec!["补充实验配置、对照方案和判定指标。".to_string()],
+            asset_snapshot: experiment_asset_snapshot(
+                &title,
+                &config_value,
+                &result_value,
+                &notes_value,
+            ),
+        },
+    )
+    .await;
 
     Ok(json!({ "id": id, "title": title }))
 }
@@ -182,6 +208,50 @@ async fn update_experiment_core(
     if update.rows_affected() == 0 {
         return Err("实验记录不存在".into());
     }
+    let row =
+        sqlx::query("SELECT title, config, result, notes FROM experiment_records WHERE id = ?")
+            .bind(id)
+            .fetch_one(db)
+            .await
+            .map_err(|error| error.to_string())?;
+    let snapshot_title: String = row.get("title");
+    let snapshot_config_raw: String = row.get("config");
+    let snapshot_result: String = row.get("result");
+    let snapshot_notes: String = row.get("notes");
+    let snapshot_config = serde_json::from_str(&snapshot_config_raw).unwrap_or_else(|_| json!({}));
+    let mut completed_items = vec!["实验记录已更新。".to_string()];
+    if !snapshot_result.trim().is_empty() {
+        completed_items.push("已记录实验结果。".to_string());
+    }
+    let next_steps = if snapshot_result.trim().is_empty() {
+        vec!["执行实验并记录结果。".to_string()]
+    } else {
+        vec!["依据本轮结果判断是否支持假设，并形成下一轮调整。".to_string()]
+    };
+    let _ = record_research_asset_checkpoint(
+        db,
+        ResearchAssetCheckpointInput {
+            context_type: "experiment",
+            context_id: id,
+            action: "experiment.updated",
+            goal: &snapshot_title,
+            summary: if snapshot_result.trim().is_empty() {
+                "实验配置或备注发生变化。"
+            } else {
+                "实验结果已更新，需要据此判断假设并规划下一轮。"
+            },
+            completed_items,
+            open_questions: Vec::new(),
+            next_steps,
+            asset_snapshot: experiment_asset_snapshot(
+                &snapshot_title,
+                &snapshot_config,
+                &snapshot_result,
+                &snapshot_notes,
+            ),
+        },
+    )
+    .await;
     Ok(())
 }
 

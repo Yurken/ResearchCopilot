@@ -191,10 +191,20 @@ export interface MockReviewInput {
 }
 
 export interface MockReviewerResult {
+  id: string;
   reviewer: string;
   content: string;
+  suggestions: string[];
   tags: string[];
   verdict: ReviewVerdict;
+}
+
+export type ReviewFeedbackStatus = "pending" | "adopted" | "ignored" | "done";
+
+export interface ReviewSuggestionFeedback {
+  itemKey: string;
+  status: ReviewFeedbackStatus;
+  reason: string;
 }
 
 export interface SubmissionDiagnosisReport {

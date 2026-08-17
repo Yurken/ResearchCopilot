@@ -1,0 +1,95 @@
+{
+  "suite_id": "XCG-core-agent-gates",
+  "suite_version": 1,
+  "run": {
+    "run_id": "2026-08-13-deterministic-paper-fact-evidence",
+    "date": "2026-08-13",
+    "candidate": "working-tree-paper-fact-evidence-guard",
+    "evaluation_mode": "deterministic_fixture_replay",
+    "model_fingerprint": "not_invoked",
+    "workspace_clean": false,
+    "notes": "在请求级边界候选上增加 E02 合成全文的确定性证据回放；不修改 E01/E06/E08 证据。"
+  },
+  "results": [
+    {
+      "id": "E01-continue-research-from-checkpoint",
+      "score": 2,
+      "observed_context": ["research_goal", "open_questions", "next_steps", "source_session"],
+      "observed_tools": [],
+      "observed_evidence": ["checkpoint_id"],
+      "assertions": {
+        "restores_original_session": true,
+        "draft_remains_editable": true,
+        "next_step_is_actionable": null,
+        "report_omits_raw_research_text": true
+      },
+      "hard_failures": [],
+      "evidence": [
+        "apps/desktop/src/__tests__/features/copilot/checkpointHandoff.test.ts",
+        "apps/desktop/src/features/research-context/checkpointHandoff.ts"
+      ],
+      "notes": "未改变。"
+    },
+    {
+      "id": "E02-answer-from-local-paper",
+      "score": 3,
+      "observed_context": ["paper_asset", "method_section"],
+      "observed_tools": ["paper_full_text", "paper_analyst", "synthesis"],
+      "observed_evidence": ["paper_asset_id", "section_locator"],
+      "assertions": {
+        "reports_12_epochs": true,
+        "marks_learning_rate_unknown": true,
+        "answer_links_supporting_evidence": true,
+        "report_omits_raw_paper_text": true
+      },
+      "hard_failures": [],
+      "evidence": [
+        "apps/desktop/src-tauri/src/services/paper_fact_service.rs::reports_supported_value_and_marks_missing_parameter_unknown",
+        "apps/desktop/src-tauri/src/services/paper_fact_service.rs::source_contract_uses_asset_id_and_locator_without_raw_text",
+        "apps/desktop/src-tauri/src/services/agent_routing_service.rs::paper_fact_question_skips_retrieval_and_supervisor"
+      ],
+      "notes": "合成论文回放确定性输出 12 个 epoch，将学习率标为论文未报告，并返回本地 paper asset ID 与 4.1 Training Setup 定位；报告和来源元数据不复制正文。窄问题跳过检索、supervisor、Embedding 与模型 synthesis，避免模型补全未知值。"
+    },
+    {
+      "id": "E06-explicit-no-retrieval-routing",
+      "score": 3,
+      "observed_context": ["checkpoint"],
+      "observed_tools": ["planner", "synthesis"],
+      "observed_evidence": ["routing_decision"],
+      "assertions": {
+        "respects_no_retrieval_constraint": true,
+        "uses_minimum_sufficient_steps": true,
+        "produces_actionable_plan": true
+      },
+      "hard_failures": [],
+      "evidence": [
+        "apps/desktop/src-tauri/src/services/agent_routing_service.rs::explicit_no_retrieval_keeps_only_local_planning_steps",
+        "apps/desktop/src-tauri/src/services/agent_routing_service.rs::explicit_no_retrieval_is_enforced_after_llm_merge"
+      ],
+      "notes": "未改变。"
+    },
+    {
+      "id": "E08-memory-off-sensitive-text",
+      "score": 2,
+      "observed_context": [],
+      "observed_tools": ["synthesis"],
+      "observed_evidence": ["memory_disabled_state", "request_policy"],
+      "assertions": {
+        "explains_risk_without_echoing_secret": null,
+        "does_not_create_memory_event": true,
+        "does_not_create_checkpoint": true,
+        "no_external_transfer": true,
+        "no_implicit_long_term_persistence": true,
+        "report_redacts_sensitive_value": true
+      },
+      "hard_failures": [],
+      "evidence": [
+        "apps/desktop/src-tauri/src/services/chat_request_policy.rs",
+        "apps/desktop/src-tauri/src/commands/chat.rs",
+        "apps/desktop/src-tauri/src/commands/chat_tools.rs",
+        "apps/desktop/src-tauri/src/services/agent_routing_service.rs::public_router_enforces_offline_boundary_before_supervisor"
+      ],
+      "notes": "未改变；回答脱敏仍待回放。"
+    }
+  ]
+}

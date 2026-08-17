@@ -198,15 +198,16 @@ pub async fn github_project_search(
     let settings = state.settings.read().await.clone();
 
     // 1. Query Rewrite：把用户需求扩展成多个 GitHub 搜索查询。
-    let search_queries = expand_search_queries(&settings, &query).await.unwrap_or_else(|error| {
-        eprintln!("扩展 GitHub 搜索查询失败：{}", error);
-        vec![query.clone()]
-    });
+    let search_queries = expand_search_queries(&settings, &query)
+        .await
+        .unwrap_or_else(|error| {
+            eprintln!("扩展 GitHub 搜索查询失败：{}", error);
+            vec![query.clone()]
+        });
 
     // 2. 多源召回：GitHub Search API + awesome 仓库搜索 + 联网搜索降级。
     let (mut repos, provider) =
-        match fetch_candidates_multi_source(&settings, &search_queries, &query, limit * 3,
-        ).await {
+        match fetch_candidates_multi_source(&settings, &search_queries, &query, limit * 3).await {
             Ok(items) => (items, "github_api".to_string()),
             Err(github_err) => {
                 let web_queries: Vec<String> = search_queries
@@ -384,7 +385,9 @@ async fn fetch_github_search(
     for api_repo in payload.items {
         let full_name = api_repo.full_name.clone();
         let mut repo = map_github_repo(api_repo);
-        repo.readme_snippet = fetch_readme_snippet(settings, &full_name).await.unwrap_or_default();
+        repo.readme_snippet = fetch_readme_snippet(settings, &full_name)
+            .await
+            .unwrap_or_default();
         repos.push(repo);
     }
 
@@ -471,9 +474,7 @@ async fn fetch_readme_snippet(
         payload.content
     };
 
-    Ok(truncate_text(&clean_markdown(&decoded),
-        1200,
-    ))
+    Ok(truncate_text(&clean_markdown(&decoded), 1200))
 }
 
 /// 基于内置领域知识库，生成兜底扩展查询。
@@ -500,8 +501,12 @@ async fn expand_search_queries(
         Err(_) => return Ok(vec![query.to_string()]),
     };
 
-    let model = resolve_model(settings, &["multi_agent_literature_scout_model", "copilot_simple_model"]);
-    let temperature = resolve_temperature(settings, "multi_agent_literature_scout_temperature", 0.4);
+    let model = resolve_model(
+        settings,
+        &["multi_agent_literature_scout_model", "copilot_simple_model"],
+    );
+    let temperature =
+        resolve_temperature(settings, "multi_agent_literature_scout_temperature", 0.4);
 
     let prompt = format!(
         "你是 GitHub 开源项目搜索专家。用户用自然语言描述需求，请你生成 3-5 个适合 GitHub Search API 的英文搜索查询。\n\n\
@@ -519,7 +524,9 @@ async fn expand_search_queries(
         LlmMessage::user(prompt),
     ];
 
-    let raw = client.chat(&messages, model.as_deref(), temperature).await?;
+    let raw = client
+        .chat(&messages, model.as_deref(), temperature)
+        .await?;
     let clean = crate::commands::papers::extract_json_pub(&raw);
     let parsed: Vec<String> = match serde_json::from_str(&clean) {
         Ok(v) => v,
@@ -555,7 +562,10 @@ async fn filter_unsafe_repos(
     for repo in &mut repos {
         let text = format!(
             "{} {} {} {}",
-            repo.full_name, repo.description, repo.readme_snippet, repo.topics.join(" ")
+            repo.full_name,
+            repo.description,
+            repo.readme_snippet,
+            repo.topics.join(" ")
         )
         .to_lowercase();
         let mut risk = 0.0_f32;
@@ -568,7 +578,9 @@ async fn filter_unsafe_repos(
     }
 
     // 第二层：LLM 安全分类器（采样前 30 个做精细判断）。
-    let llm_results = classify_repos_safety(settings, &repos, query).await.unwrap_or_default();
+    let llm_results = classify_repos_safety(settings, &repos, query)
+        .await
+        .unwrap_or_default();
 
     let mut safe_repos = Vec::new();
     for mut repo in repos {
@@ -601,7 +613,10 @@ async fn classify_repos_safety(
         Err(_) => return Ok(HashMap::new()),
     };
 
-    let model = resolve_model(settings, &["copilot_simple_model", "multi_agent_literature_scout_model"]);
+    let model = resolve_model(
+        settings,
+        &["copilot_simple_model", "multi_agent_literature_scout_model"],
+    );
     let temperature = resolve_temperature(settings, "copilot_simple_temperature", 0.1);
 
     // 为了控制 token，只检测前 30 个候选。
@@ -640,7 +655,9 @@ async fn classify_repos_safety(
         LlmMessage::user(prompt),
     ];
 
-    let raw = client.chat(&messages, model.as_deref(), temperature).await?;
+    let raw = client
+        .chat(&messages, model.as_deref(), temperature)
+        .await?;
     let clean = crate::commands::papers::extract_json_pub(&raw);
     let parsed: Vec<SafetyCheckResponse> = match serde_json::from_str(&clean) {
         Ok(v) => v,
@@ -666,8 +683,12 @@ async fn rerank_with_llm(
         Err(_) => return Ok(None),
     };
 
-    let model = resolve_model(settings, &["multi_agent_literature_scout_model", "copilot_simple_model"]);
-    let temperature = resolve_temperature(settings, "multi_agent_literature_scout_temperature", 0.2);
+    let model = resolve_model(
+        settings,
+        &["multi_agent_literature_scout_model", "copilot_simple_model"],
+    );
+    let temperature =
+        resolve_temperature(settings, "multi_agent_literature_scout_temperature", 0.2);
 
     let payload = repos
         .iter()

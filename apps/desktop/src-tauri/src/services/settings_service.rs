@@ -54,6 +54,7 @@ pub(crate) const BACKUP_TABLES: &[&str] = &[
     "settings",
     "settings_history",
     "research_interests",
+    "research_hypothesis_versions",
     "chat_sessions",
     "skills",
     "venues",
@@ -76,6 +77,7 @@ pub(crate) const BACKUP_TABLES: &[&str] = &[
     "review_comments",
     "submission_checklist",
     "submission_diagnosis_reports",
+    "submission_review_feedback",
     "submission_revision_tasks",
     "experiment_attachments",
     "knowledge_graph_evidence_links",
@@ -985,7 +987,11 @@ pub async fn list_models(
                     .map(|value| value.trim().to_string())
                     .filter(|value| !value.is_empty())
                     .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
-                (base, merged.get("openai_api_key").cloned().unwrap_or_default(), false)
+                (
+                    base,
+                    merged.get("openai_api_key").cloned().unwrap_or_default(),
+                    false,
+                )
             }
         }
     };
@@ -1005,7 +1011,9 @@ pub async fn list_models(
     let request = if is_anthropic {
         // Kimi Code 的 /models 端点实际走 OpenAI 兼容认证（Authorization: Bearer），
         // 而不是 Anthropic 的 x-api-key；/messages 仍保持 x-api-key。
-        let is_kimi_coding = models_url.to_ascii_lowercase().contains("api.kimi.com/coding");
+        let is_kimi_coding = models_url
+            .to_ascii_lowercase()
+            .contains("api.kimi.com/coding");
         if is_kimi_coding {
             client
                 .get(&models_url)

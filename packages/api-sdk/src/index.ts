@@ -10,6 +10,7 @@ import type {
   ChatStreamChunk,
   ResearchInterest,
   ResearchInterestProfile,
+  ResearchHypothesisCard,
   ResearchInterestHintRequest,
   ResearchInterestHintResponse,
   KnowledgeNote,
@@ -166,10 +167,10 @@ export function createClient(config: ClientConfig) {
 
     knowledge: {
       listInterests: () => r<ResearchInterest[]>("/api/knowledge/interests"),
-      createInterest: (topic: string, keywords: string[], profile?: ResearchInterestProfile) =>
+      createInterest: (topic: string, keywords: string[], profile?: ResearchInterestProfile, hypothesisCard?: ResearchHypothesisCard) =>
         r<ResearchInterest>("/api/knowledge/interests", {
           method: "POST",
-          body: JSON.stringify({ topic, keywords, profile }),
+          body: JSON.stringify({ topic, keywords, profile, hypothesis_card: hypothesisCard }),
         }),
       generateInterestHints: (data: ResearchInterestHintRequest) =>
         r<ResearchInterestHintResponse>("/api/knowledge/interests/hints", {

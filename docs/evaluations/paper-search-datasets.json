@@ -1,0 +1,45 @@
+{
+  "manifest_version": 1,
+  "updated_at": "2026-08-09",
+  "datasets": [
+    {
+      "id": "litsearch-query",
+      "status": "available",
+      "license": "MIT",
+      "revision": "cf3021a3bd442c7c334dca78b9c8b7da170c6a1b",
+      "url": "https://huggingface.co/datasets/princeton-nlp/LitSearch/blob/main/query/full-00000-of-00001.parquet",
+      "local_path": "data/evaluations/litsearch/query.parquet",
+      "sha256": "38cdbe4a6b7a7f5776d08055bfbf6e4511000aa2a523866592b4bb273388b914",
+      "rows": 597,
+      "usage": "Primary development benchmark for paper-finding Precision/Recall/F1."
+    },
+    {
+      "id": "litsearch-gold-metadata",
+      "status": "available",
+      "source": "Semantic Scholar Graph API batch paper lookup",
+      "source_revision": "LitSearch query revision cf3021a3bd442c7c334dca78b9c8b7da170c6a1b",
+      "local_path": "data/evaluations/litsearch/gold_metadata.jsonl",
+      "sha256": "9b978119851fe6b91c122229c30b7616e10dfc5e87dd5277cc0109edb6a37753",
+      "rows": 574,
+      "resolved_rows": 572,
+      "usage": "Canonical paperId and corpus-ID aliases for stable gold scoring and offline failure inspection."
+    },
+    {
+      "id": "pasa-realscholarquery",
+      "status": "requires_user_license_acceptance",
+      "license": "gated terms on Hugging Face",
+      "url": "https://huggingface.co/datasets/CarlanLark/pasa-dataset",
+      "local_path": "data/evaluations/pasa/RealScholarQuery/test.jsonl",
+      "usage": "Complex real-world academic query evaluation after authorized access."
+    },
+    {
+      "id": "astabench-paper-finder",
+      "status": "requires_user_license_acceptance",
+      "license": "gated terms on Hugging Face",
+      "revision": "v0.3.1",
+      "url": "https://huggingface.co/datasets/allenai/asta-bench",
+      "local_path": "data/evaluations/astabench/",
+      "usage": "Controlled PaperFindingBench validation after authorized access."
+    }
+  ]
+}

@@ -79,6 +79,7 @@ describe("usePaperDiscoverySearch", () => {
       "2020-05-18",
       6,
       "relevance",
+      "balanced",
     );
     expect(mocks.webSearch).toHaveBeenNthCalledWith(1, "hierarchical neural models", "2020-05-18");
     expect(mocks.webSearch).toHaveBeenNthCalledWith(2, "spatiotemporal sign language", "2020-05-18");
@@ -92,6 +93,29 @@ describe("usePaperDiscoverySearch", () => {
     expect(restored.result.current.resultProps.searched).toBe(false);
     expect(restored.result.current.resultProps.result).toBeNull();
     expect(restored.result.current.resultProps.webSupplement).toBeNull();
+  });
+
+  it("快速模式限制学术预算并只补充一条网络查询", async () => {
+    mocks.paperSearch.mockResolvedValue(response);
+    mocks.webSearch.mockResolvedValue(webSupplement);
+    const { result } = renderHook(() => usePaperDiscoverySearch());
+
+    act(() => {
+      result.current.panelProps.onTopicChange("agentic paper search");
+      result.current.panelProps.onSearchDepthChange("quick");
+    });
+    await act(async () => {
+      await result.current.panelProps.onSubmit();
+    });
+
+    expect(mocks.paperSearch).toHaveBeenCalledWith(
+      expect.objectContaining({ topic: "agentic paper search" }),
+      expect.any(String),
+      6,
+      "relevance",
+      "quick",
+    );
+    expect(mocks.webSearch).toHaveBeenCalledTimes(1);
   });
 
   it("新检索失败时清空并持久化移除上一轮结果", async () => {

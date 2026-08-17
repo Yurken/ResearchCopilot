@@ -11,6 +11,7 @@ use crate::llm::{resolve_model, resolve_temperature, LlmClient, LlmMessage};
 use crate::services::agent_event_service::{
     emit_agent_event, AgentEvent, AgentRunEvent, AgentRunEventInput, AgentRunStatus,
 };
+use crate::services::paper_fact_service::verified_answer_from_worker_output;
 use crate::text_utils::truncate_chars_with_ellipsis;
 use anyhow::Result;
 use futures_util::future::join_all;
@@ -342,6 +343,9 @@ pub async fn run_agentic_graph(
                 ));
                 // 同步到 state
                 state.context_parts = workspace.context_parts.clone();
+                state
+                    .outputs
+                    .insert(output.agent_name.clone(), agent_output.full_content.clone());
             }
 
             match &output.result {
@@ -856,24 +860,39 @@ async fn execute_synthesis_node(
     synthesis_msgs.extend_from_slice(history);
     synthesis_msgs.push(LlmMessage::user(&synthesis_prompt));
 
-    let rid = request_id.to_string();
-    let app_clone = app.clone();
-    let result = client
-        .stream_chat(
-            &synthesis_msgs,
-            synthesis_model.as_deref(),
-            synthesis_temp,
-            move |delta| {
-                let _ = emit_agent_event(
-                    &app_clone,
-                    AgentEvent::TextDelta {
-                        request_id: rid.clone(),
-                        delta,
-                    },
-                );
+    let verified_answer = state
+        .outputs
+        .get("paper_analyst")
+        .and_then(|output| verified_answer_from_worker_output(output));
+    let result = if let Some(answer) = verified_answer {
+        let _ = emit_agent_event(
+            app,
+            AgentEvent::TextDelta {
+                request_id: request_id.to_string(),
+                delta: answer.clone(),
             },
-        )
-        .await;
+        );
+        Ok(answer)
+    } else {
+        let rid = request_id.to_string();
+        let app_clone = app.clone();
+        client
+            .stream_chat(
+                &synthesis_msgs,
+                synthesis_model.as_deref(),
+                synthesis_temp,
+                move |delta| {
+                    let _ = emit_agent_event(
+                        &app_clone,
+                        AgentEvent::TextDelta {
+                            request_id: rid.clone(),
+                            delta,
+                        },
+                    );
+                },
+            )
+            .await
+    };
 
     let finished_at = chrono::Utc::now().to_rfc3339();
     match result {
