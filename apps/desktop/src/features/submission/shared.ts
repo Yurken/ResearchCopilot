@@ -237,12 +237,6 @@ export interface SubmissionRevisionTask {
   updatedAt: Date;
 }
 
-export interface SubmissionExperimentOption {
-  id: string;
-  title: string;
-  linkedSubmissionId?: string;
-}
-
 export interface ReviewFormState {
   reviewer: string;
   content: string;
@@ -696,14 +690,5 @@ export function rowToRevisionTask(value: unknown): SubmissionRevisionTask {
     experimentTitle: optionalStringField(row, "experimentTitle"),
     createdAt: dateField(row, "createdAt") ?? new Date(),
     updatedAt: dateField(row, "updatedAt") ?? new Date(),
-  };
-}
-
-export function rowToSubmissionExperimentOption(value: unknown): SubmissionExperimentOption {
-  const row = asRow(value);
-  return {
-    id: stringField(row, "id"),
-    title: stringField(row, "title"),
-    linkedSubmissionId: optionalStringField(row, "linkedSubmissionId"),
   };
 }

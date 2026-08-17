@@ -1,6 +1,5 @@
 use crate::ccf;
 use crate::commands::arxiv::run_arxiv_search;
-use crate::commands::experiment::create_experiment_core;
 use crate::commands::knowledge_notes::create_note_core;
 use crate::commands::misc::{run_planner_generation, run_survey_generation};
 use crate::journal_partitions;
@@ -83,35 +82,6 @@ fn create_note_tool() -> ToolDefinition {
     }
 }
 
-fn create_experiment_tool() -> ToolDefinition {
-    ToolDefinition {
-        name: "create_experiment".into(),
-        description: "在实验记录中创建一条新的实验记录。当用户描述了一个实验方案、配置参数、实验结果或观察发现时使用。创建的实验会出现在实验记录页面。".into(),
-        parameters: json!({
-            "type": "object",
-            "properties": {
-                "title": {
-                    "type": "string",
-                    "description": "实验标题"
-                },
-                "config": {
-                    "type": "object",
-                    "description": "实验配置参数（JSON对象）"
-                },
-                "result": {
-                    "type": "string",
-                    "description": "实验结果描述"
-                },
-                "notes": {
-                    "type": "string",
-                    "description": "实验笔记和观察"
-                }
-            },
-            "required": ["title"]
-        }),
-    }
-}
-
 fn generate_survey_tool() -> ToolDefinition {
     ToolDefinition {
         name: "generate_survey".into(),
@@ -130,28 +100,6 @@ fn generate_survey_tool() -> ToolDefinition {
                 "language": {
                     "type": "string",
                     "description": "输出语言：zh（中文）或en（英文），默认zh"
-                }
-            },
-            "required": ["query"]
-        }),
-    }
-}
-
-fn search_experiments_tool() -> ToolDefinition {
-    ToolDefinition {
-        name: "search_experiments".into(),
-        description: "搜索本地实验记录。当需要查找用户之前记录的实验方案、结果或观察时使用。"
-            .into(),
-        parameters: json!({
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "搜索关键词，匹配实验标题和内容"
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "返回结果数量，默认10"
                 }
             },
             "required": ["query"]
@@ -249,9 +197,7 @@ fn all_tool_definitions() -> Vec<ToolDefinition> {
         search_knowledge_tool(),
         search_papers_tool(),
         create_note_tool(),
-        create_experiment_tool(),
         generate_survey_tool(),
-        search_experiments_tool(),
         generate_plan_tool(),
         search_arxiv_tool(),
         query_journal_tool(),
@@ -267,7 +213,7 @@ fn tool_requires_external_access(name: &str) -> bool {
 }
 
 fn tool_creates_persistent_asset(name: &str) -> bool {
-    matches!(name, "create_note" | "create_experiment")
+    matches!(name, "create_note")
 }
 
 pub fn build_chat_tools(
@@ -317,11 +263,9 @@ pub async fn dispatch_tool(
         "search_knowledge" => dispatch_search_knowledge(db, tool_call).await,
         "search_papers" => dispatch_search_papers(db, tool_call).await,
         "create_note" => dispatch_create_note(app, db, settings, tool_call, request_id).await,
-        "create_experiment" => dispatch_create_experiment(app, db, tool_call, request_id).await,
         "generate_survey" => {
             dispatch_generate_survey(app, db, settings, tool_call, request_id).await
         }
-        "search_experiments" => dispatch_search_experiments(db, tool_call).await,
         "generate_plan" => dispatch_generate_plan(app, settings, tool_call, request_id).await,
         "search_arxiv" => dispatch_search_arxiv(settings, tool_call).await,
         "query_journal" => dispatch_query_journal(tool_call).await,
@@ -358,7 +302,6 @@ mod tests {
         for local in [
             "search_knowledge",
             "search_papers",
-            "search_experiments",
             "query_journal",
             "lookup_ccf",
         ] {
@@ -385,8 +328,15 @@ mod tests {
         let names = tool_names(true, false);
 
         assert!(!names.iter().any(|name| name == "create_note"));
-        assert!(!names.iter().any(|name| name == "create_experiment"));
         assert!(names.iter().any(|name| name == "search_knowledge"));
+    }
+
+    #[test]
+    fn legacy_experiment_tools_are_not_exposed() {
+        let names = tool_names(true, true);
+
+        assert!(!names.iter().any(|name| name == "create_experiment"));
+        assert!(!names.iter().any(|name| name == "search_experiments"));
     }
 }
 
@@ -499,54 +449,6 @@ async fn dispatch_search_papers(
     ))
 }
 
-async fn dispatch_search_experiments(
-    db: &sqlx::SqlitePool,
-    tool_call: &ToolCall,
-) -> Result<String, String> {
-    let query = parse_str_arg(&tool_call.arguments, "query");
-    let limit = parse_int_arg(&tool_call.arguments, "limit", 10);
-
-    if query.is_empty() {
-        return Ok("搜索关键词为空，无法执行搜索。".into());
-    }
-
-    let like = format!("%{}%", query);
-    let rows = sqlx::query(
-        "SELECT id, title, result, notes, created_at
-         FROM experiment_records
-         WHERE title LIKE ? OR result LIKE ? OR notes LIKE ?
-         ORDER BY created_at DESC LIMIT ?",
-    )
-    .bind(&like)
-    .bind(&like)
-    .bind(&like)
-    .bind(limit)
-    .fetch_all(db)
-    .await
-    .map_err(|e| format!("实验记录搜索失败: {}", e))?;
-
-    if rows.is_empty() {
-        return Ok(format!("未找到与「{}」相关的实验记录。", query));
-    }
-
-    let results: Vec<String> = rows
-        .iter()
-        .enumerate()
-        .map(|(i, r)| {
-            let title: String = r.get("title");
-            let result_text: Option<String> = r.get("result");
-            let snippet: String = result_text.unwrap_or_default().chars().take(150).collect();
-            format!("{}. {} — {}", i + 1, title, snippet)
-        })
-        .collect();
-
-    Ok(format!(
-        "实验记录搜索结果（共{}条）：\n{}",
-        results.len(),
-        results.join("\n")
-    ))
-}
-
 // ── Write dispatchers ────────────────────────────────────────
 
 async fn dispatch_create_note(
@@ -615,61 +517,6 @@ async fn dispatch_create_note(
             ))
         }
         Err(e) => Err(format!("创建笔记失败: {}", e)),
-    }
-}
-
-async fn dispatch_create_experiment(
-    app: &tauri::AppHandle,
-    db: &sqlx::SqlitePool,
-    tool_call: &ToolCall,
-    request_id: &str,
-) -> Result<String, String> {
-    let title = parse_str_arg(&tool_call.arguments, "title");
-    let config: Option<serde_json::Value> =
-        serde_json::from_str::<serde_json::Value>(&tool_call.arguments)
-            .ok()
-            .and_then(|v| v.get("config").cloned());
-    let result_text: Option<String> =
-        serde_json::from_str::<serde_json::Value>(&tool_call.arguments)
-            .ok()
-            .and_then(|v| {
-                v.get("result")
-                    .and_then(|s| s.as_str().map(|s| s.to_string()))
-            });
-    let notes: Option<String> = serde_json::from_str::<serde_json::Value>(&tool_call.arguments)
-        .ok()
-        .and_then(|v| {
-            v.get("notes")
-                .and_then(|s| s.as_str().map(|s| s.to_string()))
-        });
-
-    if title.is_empty() {
-        return Err("实验标题不能为空。".into());
-    }
-
-    match create_experiment_core(db, title.clone(), config, result_text, notes, None).await {
-        Ok(result) => {
-            let exp_id = result["id"].as_str().unwrap_or("").to_string();
-            let _ = app.emit(
-                "chat:tool_result",
-                json!({
-                    "request_id": request_id,
-                    "tool_name": tool_call.name,
-                    "tool_id": tool_call.id,
-                    "result": format!("已创建实验记录：{}", title),
-                    "result_id": exp_id
-                }),
-            );
-            let _ = app.emit(
-                "experiment:created",
-                json!({ "id": exp_id, "title": title }),
-            );
-            Ok(format!(
-                "已成功创建实验记录「{}」（ID: {}）。用户可以在实验记录页面查看。",
-                title, exp_id
-            ))
-        }
-        Err(e) => Err(format!("创建实验记录失败: {}", e)),
     }
 }
 

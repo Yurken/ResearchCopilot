@@ -1,9 +1,9 @@
 import {
   ArrowUpRight,
   FileText,
-  FlaskConical,
   MessageSquare,
   Send,
+  SquareTerminal,
   StickyNote,
   type LucideIcon,
 } from "lucide-react";
@@ -20,7 +20,7 @@ interface ModuleCard {
   to: string;
   icon: LucideIcon;
   iconColor: string;
-  count: number;
+  count: number | string;
   caption: string;
 }
 
@@ -45,13 +45,13 @@ export default function ThemeModuleGrid({ progress }: ThemeModuleGridProps) {
       caption: progress.claimCount > 0 ? `${progress.claimCount} 条主张` : "知识沉淀",
     },
     {
-      key: "experiment",
-      label: "实验",
-      to: "/experiment",
-      icon: FlaskConical,
+      key: "code",
+      label: "代码",
+      to: "/code",
+      icon: SquareTerminal,
       iconColor: "text-apple-orange",
-      count: progress.experimentCount,
-      caption: "证据链记录",
+      count: "DSH",
+      caption: "官方 Harness",
     },
     {
       key: "submission",

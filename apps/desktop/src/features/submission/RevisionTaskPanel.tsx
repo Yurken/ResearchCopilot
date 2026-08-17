@@ -5,19 +5,17 @@ import {
   REVISION_TASK_STATUS_CFG,
   type PaperVersion,
   type RevisionTaskStatus,
-  type SubmissionExperimentOption,
   type SubmissionRevisionTask,
 } from "./shared";
 
 interface RevisionTaskPanelProps {
   tasks: SubmissionRevisionTask[];
   versions: PaperVersion[];
-  experiments: SubmissionExperimentOption[];
   loading: boolean;
   updatingTaskId: string | null;
   onUpdateTask: (
     taskId: string,
-    patch: Partial<{ status: RevisionTaskStatus; paperVersionId: string; experimentId: string }>,
+    patch: Partial<{ status: RevisionTaskStatus; paperVersionId: string }>,
   ) => void | Promise<void>;
 }
 
@@ -30,7 +28,6 @@ const STATUS_OPTIONS: Array<{ value: RevisionTaskStatus; label: string }> = [
 export default function RevisionTaskPanel({
   tasks,
   versions,
-  experiments,
   loading,
   updatingTaskId,
   onUpdateTask,
@@ -44,7 +41,7 @@ export default function RevisionTaskPanel({
             <p className="font-semibold text-ink-primary">修改任务与证据链</p>
           </div>
           <p className="mt-0.5 text-xs text-ink-tertiary">
-            {tasks.length > 0 ? `${tasks.length} 个任务 · 可关联论文版本和实验记录` : "诊断报告转出的任务会出现在这里"}
+            {tasks.length > 0 ? `${tasks.length} 个任务 · 可关联论文版本` : "诊断报告转出的任务会出现在这里"}
           </p>
         </div>
         {loading ? <Loader2 className="h-4 w-4 animate-spin text-ink-tertiary" /> : null}
@@ -55,7 +52,7 @@ export default function RevisionTaskPanel({
           className="rounded-2xl px-3 py-2 text-xs leading-5 text-ink-tertiary"
           style={{ background: "var(--rc-card-inset-bg)", border: "1px solid var(--rc-card-inset-outline)" }}
         >
-          暂无修改任务。可从上方诊断报告转出任务，再为每个问题补充实验或新版本。
+          暂无修改任务。可从上方诊断报告转出任务，再为每个问题补充新版本。
         </p>
       ) : (
         <div className="space-y-2">
@@ -114,18 +111,6 @@ export default function RevisionTaskPanel({
                     ))}
                   </select>
 
-                  <select
-                    value={task.experimentId ?? ""}
-                    disabled={updating}
-                    onChange={(event) => void onUpdateTask(task.id, { experimentId: event.target.value })}
-                    className="rounded-xl px-2 py-1.5 text-xs text-ink-secondary outline-none"
-                    style={{ background: "var(--rc-elevated)", border: "1px solid var(--rc-border)" }}
-                  >
-                    <option value="">关联实验记录</option>
-                    {experiments.map((experiment) => (
-                      <option key={experiment.id} value={experiment.id}>{experiment.title}</option>
-                    ))}
-                  </select>
                 </div>
 
                 {(task.paperVersionLabel || task.experimentTitle) ? (

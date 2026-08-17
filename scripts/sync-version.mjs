@@ -127,6 +127,32 @@ updateText("apps/desktop/src-tauri/src/commands/paper_search.rs", (text) => {
   );
 }, touched);
 
+for (const file of [
+  "apps/desktop/src-tauri/src/commands/paper_search_snippets.rs",
+  "apps/desktop/src-tauri/src/commands/paper_search_strategy.rs",
+]) {
+  updateText(file, (text) => {
+    return text.replace(
+      /^(const (?:SEMANTIC_SCHOLAR_USER_AGENT|USER_AGENT): &str = "xiaoyan-desktop\/)[0-9A-Za-z.+-]+(")/m,
+      `$1${appVersion}$2`,
+    );
+  }, touched);
+}
+
+updateText("scripts/paper-search-eval/prepare_gold_metadata.py", (text) => {
+  return text.replace(
+    /(User-Agent": "xiaoyan-paper-search-eval\/)[0-9A-Za-z.+-]+(")/,
+    `$1${appVersion}$2`,
+  );
+}, touched);
+
+updateText("scripts/paper-search-eval/probe_snippet_search.py", (text) => {
+  return text.replace(
+    /(User-Agent": "xiaoyan-paper-search-eval\/)[0-9A-Za-z.+-]+(")/,
+    `$1${appVersion}$2`,
+  );
+}, touched);
+
 if (touched.length === 0) {
   console.log(`Version already synced: ${appVersion}`);
 } else {

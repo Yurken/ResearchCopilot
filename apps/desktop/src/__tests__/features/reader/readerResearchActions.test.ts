@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Paper } from "@research-copilot/types";
 import {
-  buildPaperExperimentDraft,
   buildReaderResearchPrompt,
   derivePaperResearchStatus,
 } from "../../../features/reader/research-actions/shared";
@@ -36,18 +35,10 @@ describe("reader research actions", () => {
     expect(prompt).toContain("Nearby page text");
   });
 
-  it("从已有论文分析和复现结果生成实验草稿", () => {
-    const draft = buildPaperExperimentDraft(paper);
-    expect(draft.title).toBe("复现：Evidence-aware Research");
-    expect(draft.config).toMatchObject({ paper_id: "paper-1", evaluation_metrics: "MRR" });
-    expect(draft.notes).toContain("How should evidence be linked?");
-    expect(draft.notes).toContain("Anchor every conclusion.");
-  });
-
   it("优先把复现产物识别为下一研究阶段", () => {
     expect(derivePaperResearchStatus(paper)).toMatchObject({
       phase: "已形成复现方案",
-      nextAction: "创建实验并验证论文结果",
+      nextAction: "在代码页用 DSH 验证论文结果",
       assets: ["论文解读", "复现指南"],
     });
   });

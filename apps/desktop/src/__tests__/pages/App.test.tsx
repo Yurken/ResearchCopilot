@@ -117,12 +117,13 @@ describe("App 路由与导航", () => {
     await waitFor(() => {
       expect(screen.getByLabelText("首页")).toBeInTheDocument();
     });
+    expect(screen.getByLabelText("DSH").querySelector(".deepseek-icon")).toBeInTheDocument();
   });
 
   it("应包含所有导航项", async () => {
     renderWithRouter(<App />);
     await waitFor(() => {
-      const navLabels = ["首页", "规划", "对话", "综述", "论文", "写作", "知识", "实验", "投稿", "工具", "设置"];
+      const navLabels = ["首页", "规划", "对话", "综述", "论文", "写作", "知识", "DSH", "投稿", "工具", "设置"];
       for (const label of navLabels) {
         expect(screen.getByLabelText(label)).toBeInTheDocument();
       }
@@ -146,7 +147,7 @@ describe("App 路由与导航", () => {
       expect(screen.getByLabelText("论文")).toHaveAttribute("href", "/papers");
       expect(screen.getByLabelText("写作")).toHaveAttribute("href", "/writing");
       expect(screen.getByLabelText("知识")).toHaveAttribute("href", "/knowledge");
-      expect(screen.getByLabelText("实验")).toHaveAttribute("href", "/experiment");
+      expect(screen.getByLabelText("DSH")).toHaveAttribute("href", "/code");
       expect(screen.getByLabelText("投稿")).toHaveAttribute("href", "/submission");
       expect(screen.getByLabelText("工具")).toHaveAttribute("href", "/tools");
       expect(screen.getByLabelText("设置")).toHaveAttribute("href", "/settings");

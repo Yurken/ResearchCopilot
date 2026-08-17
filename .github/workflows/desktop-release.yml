@@ -41,6 +41,7 @@ jobs:
         with:
           ref: ${{ env.RELEASE_TAG }}
           token: ${{ secrets.GITHUB_TOKEN }}
+          submodules: recursive
 
       - name: Install pnpm
         uses: pnpm/action-setup@v6
@@ -48,15 +49,20 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            vendor/deepseek-harness/pnpm-lock.yaml
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Sync versions from tag
         run: node scripts/sync-version.mjs --tag "${{ env.RELEASE_TAG }}"
+
+      - name: Verify DeepSeek Harness source pin
+        run: pnpm dsh:verify-pin
 
       - name: Type check workspace
         run: pnpm type-check
@@ -189,6 +195,7 @@ jobs:
         with:
           ref: ${{ env.RELEASE_TAG }}
           token: ${{ secrets.GITHUB_TOKEN }}
+          submodules: recursive
 
       - name: Install pnpm
         uses: pnpm/action-setup@v6
@@ -196,9 +203,11 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            vendor/deepseek-harness/pnpm-lock.yaml
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -230,6 +239,11 @@ jobs:
 
       - name: Sync versions from tag
         run: node scripts/sync-version.mjs --tag "${{ env.RELEASE_TAG }}"
+
+      - name: Prepare locked DeepSeek Harness runtime
+        shell: bash
+        run: |
+          DSH_NODE_BINARY="$(node -p 'process.execPath')" pnpm dsh:prepare-runtime
 
       - name: Build application
         uses: tauri-apps/tauri-action@v1

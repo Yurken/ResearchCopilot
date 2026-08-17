@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { experimentApi, submissionApi } from "../../lib/client";
+import { submissionApi } from "../../lib/client";
 import {
-  rowToSubmissionExperimentOption,
   rowToRevisionTask,
   rowToVersion,
   type PaperVersion,
   type RevisionTaskStatus,
-  type SubmissionExperimentOption,
   type SubmissionRevisionTask,
 } from "./shared";
 
@@ -21,7 +19,6 @@ export function useSubmissionRevisionTasks(
 ) {
   const [tasks, setTasks] = useState<SubmissionRevisionTask[]>([]);
   const [versions, setVersions] = useState<PaperVersion[]>([]);
-  const [experiments, setExperiments] = useState<SubmissionExperimentOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [importingReportId, setImportingReportId] = useState<string | null>(null);
   const [updatingTaskId, setUpdatingTaskId] = useState<string | null>(null);
@@ -30,7 +27,6 @@ export function useSubmissionRevisionTasks(
     if (!submissionId) {
       setTasks([]);
       setVersions([]);
-      setExperiments([]);
       return Promise.resolve();
     }
 
@@ -38,16 +34,10 @@ export function useSubmissionRevisionTasks(
     return Promise.all([
       submissionApi.listRevisionTasks(submissionId),
       submissionApi.listVersions(submissionId),
-      experimentApi.list(),
     ])
-      .then(([taskResponse, versionResponse, experimentResponse]) => {
+      .then(([taskResponse, versionResponse]) => {
         setTasks(taskResponse.tasks.map(rowToRevisionTask));
         setVersions(versionResponse.versions.map(rowToVersion));
-        setExperiments(
-          experimentResponse.experiments
-            .map(rowToSubmissionExperimentOption)
-            .filter((experiment) => !experiment.linkedSubmissionId || experiment.linkedSubmissionId === submissionId)
-        );
       })
       .catch((error) => {
         onError?.(error);
@@ -81,7 +71,7 @@ export function useSubmissionRevisionTasks(
   const updateTask = useCallback(
     async (
       taskId: string,
-      patch: Partial<{ status: RevisionTaskStatus; paperVersionId: string; experimentId: string }>,
+      patch: Partial<{ status: RevisionTaskStatus; paperVersionId: string }>,
     ) => {
       setUpdatingTaskId(taskId);
       try {
@@ -99,7 +89,6 @@ export function useSubmissionRevisionTasks(
   return {
     tasks,
     versions,
-    experiments,
     loading,
     importingReportId,
     updatingTaskId,

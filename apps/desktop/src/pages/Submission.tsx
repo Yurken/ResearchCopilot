@@ -330,7 +330,6 @@ export default function Submission() {
           importingDiagnosisReportId={diagnosis.importingReportId}
           revisionTasks={revision.tasks}
           revisionVersions={revision.versions}
-          revisionExperiments={revision.experiments}
           revisionLoading={revision.loading}
           importingRevisionTaskReportId={revision.importingReportId}
           updatingRevisionTaskId={revision.updatingTaskId}

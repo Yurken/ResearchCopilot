@@ -16,6 +16,8 @@ mod citation_graph;
 mod code;
 mod commands;
 mod db;
+mod dsh;
+mod dsh_api_config;
 mod graph_rag;
 mod journal_partitions;
 mod links;
@@ -328,6 +330,8 @@ pub fn run() {
                 .app_data_dir()
                 .expect("failed to get app data dir");
 
+            app.manage(dsh::DshRuntimeState::new(app_data_dir.clone()));
+
             configure_diagnostic_log_path(&app_data_dir);
             append_diagnostic_log(&format!(
                 "startup: setup ok version={} data_dir={}",
@@ -507,6 +511,13 @@ pub fn run() {
             update_install,
             read_diagnostic_log,
             feedback_submit,
+            // DeepSeek Harness runtime
+            dsh::dsh_runtime_status,
+            dsh::dsh_runtime_configure,
+            dsh::dsh_runtime_start,
+            dsh::dsh_runtime_stop,
+            dsh::dsh_runtime_validate_external,
+            dsh::dsh_runtime_import_xiaoyan_api,
             // Papers
             papers_list,
             papers_get,

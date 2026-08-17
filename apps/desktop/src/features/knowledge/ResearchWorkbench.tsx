@@ -12,7 +12,7 @@ import { openLink } from "../../lib/links";
 import type { AgentPlanStep, AgentRun, ChatMessage, ChatSession, KnowledgeNote, Paper, ResearchInterest } from "@research-copilot/types";
 import Tools from "../../pages/Tools";
 import Writing from "../../pages/Writing";
-import Experiment from "../../pages/Experiment";
+import Code from "../../pages/Code";
 import Submission from "../../pages/Submission";
 import Knowledge from "../../pages/Knowledge";
 import { LearningPathView } from "./InterestsPanel";
@@ -562,10 +562,10 @@ export default function ResearchWorkbench({ interest, activeTab = "overview", on
         </div>
       )}
 
-      {/* ── 实验 ── */}
+      {/* ── 官方 DeepSeek Harness 代码工作区 ── */}
       {activeTab === "experiment" && (
         <div className="flex-1 min-h-0 overflow-hidden pt-2">
-          <Experiment />
+          <Code />
         </div>
       )}
 

@@ -1,4 +1,4 @@
-import { BookOpenText, FileQuestion, FlaskConical, Loader2, NotebookPen, Quote } from "lucide-react";
+import { BookOpenText, FileQuestion, Loader2, NotebookPen, Quote } from "lucide-react";
 import type { Paper } from "@research-copilot/types";
 import { useReaderResearchActions } from "./useReaderResearchActions";
 import { derivePaperResearchStatus } from "./shared";
@@ -80,14 +80,6 @@ export default function ReaderResearchActionsPanel({
           onClick={() => void actions.generateNote()}
           disabled={!paper || actions.pending !== null}
           loading={actions.pending === "note"}
-        />
-        <ActionButton
-          icon={FlaskConical}
-          title="创建复现实验"
-          detail="带入论文、方法、指标、步骤和风险"
-          onClick={() => void actions.createExperiment()}
-          disabled={!paper || actions.pending !== null}
-          loading={actions.pending === "experiment"}
         />
         <ActionButton
           icon={FileQuestion}

@@ -7,6 +7,7 @@ import { type LegacyFreeTab } from "../features/focus/shared";
 import Planner from "./Planner";
 import NoteReader from "./NoteReader";
 import PaperReader from "./PaperReader";
+import Code from "./Code";
 
 function FocusLegacyRouteRedirect({ tab }: { tab: LegacyFreeTab }) {
   const normalized = tab === "copilot" || tab === "xiaoyan" ? "chat" : tab;
@@ -31,7 +32,8 @@ export default function FocusApp() {
           <Route path="/xiaoyan" element={<FocusLegacyRouteRedirect tab="xiaoyan" />} />
           <Route path="/copilot" element={<FocusLegacyRouteRedirect tab="copilot" />} />
           <Route path="/tools" element={<FocusLegacyRouteRedirect tab="tools" />} />
-          <Route path="/experiment" element={<FocusLegacyRouteRedirect tab="experiment" />} />
+          <Route path="/experiment" element={<Navigate to="/code" replace />} />
+          <Route path="/code" element={<Code />} />
           <Route path="/submission" element={<FocusLegacyRouteRedirect tab="submission" />} />
           <Route path="/notes/:id" element={<NoteReader />} />
           <Route path="/settings" element={<FocusSettingsWrapper />} />

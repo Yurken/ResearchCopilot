@@ -87,14 +87,6 @@ const THEME_STAGE_RULES: ThemeStageRule[] = [
     count: (progress) => progress.noteCount,
   },
   {
-    key: "experiment",
-    label: "实验验证",
-    hint: "记录实验，串起证据链",
-    to: "/experiment",
-    done: (theme) => theme.progress.experimentCount > 0,
-    count: (progress) => progress.experimentCount,
-  },
-  {
     key: "submission",
     label: "投稿推进",
     hint: "把成果整理成投稿与版本",
