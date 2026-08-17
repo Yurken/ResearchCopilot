@@ -14,7 +14,7 @@ test.describe("应用导航", () => {
   test("应包含所有导航项", async ({ page }) => {
     const navLabels = [
       "首页", "规划", "对话", "综述", "论文",
-      "写作", "知识", "实验", "投稿", "工具", "设置",
+      "写作", "知识", "DSH", "投稿", "工具", "设置",
     ];
 
     for (const label of navLabels) {
@@ -56,9 +56,9 @@ test.describe("应用导航", () => {
     await expect(page).toHaveURL("/knowledge");
   });
 
-  test("点击实验应导航到实验页", async ({ page }) => {
-    await page.getByLabel("实验").click();
-    await expect(page).toHaveURL("/experiment");
+  test("点击 DSH 应导航到 DSH 页", async ({ page }) => {
+    await page.getByLabel("DSH").click();
+    await expect(page).toHaveURL("/code");
   });
 
   test("点击投稿应导航到投稿页", async ({ page }) => {

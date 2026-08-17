@@ -76,33 +76,32 @@ test.describe("工具页面", () => {
   });
 });
 
-test.describe("实验记录页面", () => {
+test.describe("DSH 页面", () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(TAURI_MOCK_SCRIPT);
-    await page.goto("/experiment");
-    await page.getByTestId("tab-records").click();
+    await page.goto("/code");
   });
 
-  test("应显示实验模块页签", async ({ page }) => {
-    await expect(page.getByTestId("tab-code")).toBeVisible();
-    await expect(page.getByTestId("tab-snapshots")).toBeVisible();
-    await expect(page.getByTestId("tab-records")).toBeVisible();
+  test("应显示 DSH 标题", async ({ page }) => {
+    await expect(page.getByRole("heading", { name: "DeepSeek Harness" })).toBeVisible();
   });
 
-  test("记录页签应处于激活状态", async ({ page }) => {
-    await expect(page.getByTestId("tab-records")).toHaveAttribute("aria-pressed", "true");
+  test("应显示启动 DSH 区域", async ({ page }) => {
+    await expect(page.getByRole("heading", { name: "启动 DSH" })).toBeVisible();
   });
 
-  test("应显示新建记录按钮", async ({ page }) => {
-    await expect(page.getByText("新建记录")).toBeVisible();
+  test("应显示运行环境选项", async ({ page }) => {
+    await expect(page.getByRole("heading", { name: "运行环境" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "内置 DSH" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "外部 DSH" })).toBeVisible();
   });
 
-  test("无记录时应显示空状态提示", async ({ page }) => {
-    await expect(page.getByText("暂无记录，点击上方「新建」开始。")).toBeVisible();
+  test("应显示工作目录选择", async ({ page }) => {
+    await expect(page.getByLabel("工作目录")).toBeVisible();
   });
 
-  test("应显示未选择状态的提示", async ({ page }) => {
-    await expect(page.getByText("从左侧选择记录，或新建一条")).toBeVisible();
+  test("应显示启动按钮", async ({ page }) => {
+    await expect(page.getByRole("button", { name: "启动 DSH" })).toBeVisible();
   });
 });
 
