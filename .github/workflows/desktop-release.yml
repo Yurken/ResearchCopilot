@@ -182,7 +182,7 @@ jobs:
             updater_target: windows-x86_64
           - label: Linux x64
             platform: ubuntu-22.04
-            args: "--verbose"
+            args: ""
             rust_target: ""
             build_target_dir: release
             updater_target: linux-x86_64
