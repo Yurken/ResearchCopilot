@@ -194,10 +194,7 @@ export default function DeepSeekHarnessWorkspace() {
             >
               <TerminalSquare className="h-4.5 w-4.5" />
             </div>
-            <div className="min-w-0">
-              <h1 className="truncate text-[15px] font-semibold text-ink-primary">小妍代码</h1>
-              <p className="truncate text-xs text-ink-tertiary">DeepSeek Harness</p>
-            </div>
+            <h1 className="truncate text-[15px] font-semibold text-ink-primary">DeepSeek Harness</h1>
           </div>
           <RuntimeControls
             phase={phase}
