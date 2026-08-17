@@ -176,7 +176,7 @@ jobs:
             updater_target: darwin-aarch64
           - label: Windows x64
             platform: windows-latest
-            args: ""
+            args: "--bundles nsis"
             rust_target: ""
             build_target_dir: release
             updater_target: windows-x86_64
@@ -229,6 +229,8 @@ jobs:
             curl \
             wget \
             file \
+            fuse \
+            libfuse2 \
             libxdo-dev \
             libssl-dev \
             libayatana-appindicator3-dev \
