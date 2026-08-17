@@ -1,15 +1,15 @@
 use crate::append_diagnostic_log;
 use crate::dsh_api_config::{resolve_xiaoyan_api, write_dsh_api_configuration, DshApiImportResult};
+use crate::dsh_process::{bundled_available, format_exit_error, launch_command, stop_child};
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::VecDeque,
     fs,
     path::{Path, PathBuf},
-    process::Stdio,
     sync::Arc,
 };
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::{Child, Command},
@@ -132,8 +132,9 @@ impl RuntimeInner {
                 self.generation = self.generation.wrapping_add(1);
                 self.url = None;
                 if self.phase != DshPhase::Stopped {
+                    let was_starting = self.phase == DshPhase::Starting;
                     self.phase = DshPhase::Failed;
-                    self.error = Some(format!("DSH 进程已退出（{status}）"));
+                    self.error = Some(format_exit_error(status, was_starting));
                 }
             }
             Ok(None) => {}
@@ -259,30 +260,6 @@ fn validate_config(config: &DshRuntimeConfig) -> Result<(), String> {
     Ok(())
 }
 
-fn bundled_paths(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
-    let resource_dir = app
-        .path()
-        .resource_dir()
-        .map_err(|error| format!("无法定位应用资源目录：{error}"))?;
-    let root = resource_dir.join("resources").join("dsh").join("runtime");
-    let node = if cfg!(windows) {
-        root.join("node.exe")
-    } else {
-        root.join("node")
-    };
-    let entry = root.join("app").join("lib").join("bin.js");
-    if !node.is_file() || !entry.is_file() {
-        return Err(
-            "当前安装包未包含 DSH 运行时，请重新构建内置运行时或切换到外部 DSH".to_string(),
-        );
-    }
-    Ok((node, entry))
-}
-
-fn bundled_available(app: &AppHandle) -> bool {
-    bundled_paths(app).is_ok()
-}
-
 fn workspace_dir(state: &DshRuntimeState, config: &DshRuntimeConfig) -> Result<PathBuf, String> {
     if let Some(path) = config
         .workspace_dir
@@ -294,44 +271,6 @@ fn workspace_dir(state: &DshRuntimeState, config: &DshRuntimeConfig) -> Result<P
     let fallback = state.app_data_dir.join("dsh").join("workspace");
     fs::create_dir_all(&fallback).map_err(|error| format!("创建默认 DSH 工作目录失败：{error}"))?;
     Ok(fallback)
-}
-
-fn launch_command(
-    app: &AppHandle,
-    state: &DshRuntimeState,
-    config: &DshRuntimeConfig,
-) -> Result<Command, String> {
-    validate_config(config)?;
-    let mut command = match config.mode {
-        DshRuntimeMode::Bundled => {
-            let (node, entry) = bundled_paths(app)?;
-            let mut command = Command::new(node);
-            command.arg(entry);
-            command
-        }
-        DshRuntimeMode::External => Command::new(
-            config
-                .external_executable
-                .as_deref()
-                .expect("validated external executable"),
-        ),
-    };
-
-    if config.profile == "web" {
-        command.arg("web");
-    } else {
-        command.args(["--profile", config.profile.as_str()]);
-    }
-    command.args(["--host", "127.0.0.1", "--port", "0"]);
-    command
-        .current_dir(workspace_dir(state, config)?)
-        .env("DSH_HOME", state.data_home(config))
-        .env("DSH_TELEMETRY_DISABLED", "1")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    Ok(command)
 }
 
 fn parse_loopback_url(line: &str) -> Option<String> {
@@ -461,7 +400,8 @@ pub async fn dsh_runtime_start(
         fs::create_dir_all(state.data_home(&config))
             .map_err(|error| format!("创建 DSH 数据目录失败：{error}"))?;
         let workspace = workspace_dir(state.inner(), &config)?;
-        let mut command = launch_command(&app, state.inner(), &config)?;
+        let mut command =
+            launch_command(&app, &config, workspace.clone(), state.data_home(&config))?;
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(error) => {
@@ -526,18 +466,8 @@ pub async fn dsh_runtime_stop(
         inner.phase = DshPhase::Stopped;
         inner.url = None;
         inner.error = None;
-        if let Some(mut child) = inner.child.take() {
-            let already_exited = child
-                .try_wait()
-                .map_err(|error| format!("读取 DSH 退出状态失败：{error}"))?
-                .is_some();
-            if !already_exited {
-                child
-                    .kill()
-                    .await
-                    .map_err(|error| format!("停止 DSH 失败：{error}"))?;
-            }
-            let _ = child.wait().await;
+        if let Some(child) = inner.child.take() {
+            stop_child(child).await?;
         }
     }
     append_diagnostic_log("dsh: runtime stopped");
