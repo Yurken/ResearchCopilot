@@ -2,11 +2,11 @@
 
 > 文档性质：长期维护的产品、评测与工程总纲
 >
-> 当前版本：`0.3.8`
+> 当前版本：`0.3.11`
 >
 > 建立日期：2026-07-29
 >
-> 最近更新：2026-08-11
+> 最近更新：2026-08-13
 >
 > 当前阶段：阶段 A「建立可信基线」
 >
@@ -31,16 +31,19 @@
 | 北极星指标 | 有效续接率 |
 | 每轮工作上限 | 1 个主假设、1 个端到端切片、最多 2 个辅助工程项 |
 | 每次 Codex 候选必跑 | E01 续接、E02 证据问答、E06 路由、E08 隐私 |
-| 当前首要缺口 | 核心门禁仍缺可执行评测；论文检索已建立跨 query set 分层基线，但人工描述型查询的 Quick 召回仍低；Agent 运行缺持久化模型指纹 |
+| 当前首要缺口 | E02 已用合成全文的确定性回放消除剩余 2 项未知硬失败断言，核心门禁完整通过；E01 的下一步可执行性与 E08 的输出脱敏仍为普通未知断言，尚不能替代人工任务或真实模型回放；Agent 运行缺持久化模型指纹 |
 | 当前不做 | 黑盒自动改代码、无授权主动执行、为了追新模型而大范围重写 |
 | 采用升级的条件 | 核心质量不退化，目标切片有可复现收益，并有对应代码与测试落地 |
 
-最近两个迭代的推进顺序：
+当前推进顺序：
 
 1. `已完成` checkpoint 从工作台显式交接到小妍，恢复原会话并预填可编辑续接请求；
-2. `下一步` 建立 E01、E02、E06、E08 的固定夹具、评分表和首版人工基线；
-3. 持久化 Agent 运行的模型指纹、策略版本、耗时和失败分类；
-4. 将设置页反馈改为结构化类别，并可选关联会话/请求。
+2. `已完成` 建立 E01、E02、E06、E08 的固定合成夹具、三态评分器与首版代码证据基线；
+3. `已完成` 将“不要联网 / 不写入长期记忆”提升为请求级可执行策略，在实际模型、Embedding、外部工具和隐式持久化之前生效；
+4. `已完成` 为 E02 增加可重复的本地论文参数证据抽取、未知项守卫、section locator 和可见来源链接，核心有效均分 `2.25 → 2.5`；
+5. `下一步` 完成 E01 的 5 组配对人工基线，验证 checkpoint 下一步是否真正可执行；
+6. 持久化 Agent 运行的模型指纹、策略版本、耗时和失败分类；
+7. 将设置页反馈改为结构化类别，并可选关联会话/请求。
 
 ## 2. 目标、边界与原则
 
@@ -83,13 +86,14 @@
 | 长期记忆 | 部分具备 | 本地 `memory_events`、`memory_observations`、checkpoint、开关、详情保护和删除入口已存在 | 缺候选记忆、作用域、置信度、过期、纠正与误召回评价 |
 | 用户反馈 | 部分具备 | 设置页支持文字、截图和用户确认附带的诊断日志；后端已有可选 category | 前端未结构化选择类别，反馈未关联会话、请求、模型和评测场景 |
 | 桌面助手 | 已具备主路径 | 流式停止、临时多轮、模型/耗时/Token 展示、本地知识、来源追溯和导入闭环已落地 | 真实 macOS 多屏/权限矩阵、匿名本地指标和部分可访问性仍待验收 |
-| 固定评测 | 部分具备 | 本文已有 E01—E10 场景定义；论文搜索已固定 LitSearch 597 条数据、574 条 gold 元数据、Quick-80 与跨 query set 分层 80 缓存切片，并能区分候选召回缺失与排序损失 | E01/E02/E06/E08 尚无统一可执行门禁；当前 LitSearch 开放世界改编只有已知目标召回意义，不能替代官方封闭语料或人工相关性评测 |
+| 固定评测 | 部分具备 | E01/E02/E06/E08 已有版本化合成夹具、三态断言、隐私硬失败和成对门禁；E08 的无外发/无隐式长期持久化及 E02 的 12 epochs/学习率未报告/section locator 均有确定性代码证据；当前核心均分 2.5、未知硬失败 0，完整门禁通过 | E01 的下一步可执行性与 E08 的输出脱敏仍未回放；合成确定性回放不能替代人工科研任务、开放式模型质量或官方封闭语料评测 |
 
 代码事实入口：
 
 - Agent 运行与上下文：[`agent_runtime_service.rs`](../apps/desktop/src-tauri/src/services/agent_runtime_service.rs)、[`agent_context_service.rs`](../apps/desktop/src-tauri/src/services/agent_context_service.rs)、[`agent_event_service.rs`](../apps/desktop/src-tauri/src/services/agent_event_service.rs)
 - 记忆与 checkpoint：[`memory_checkpoint_service.rs`](../apps/desktop/src-tauri/src/services/memory_checkpoint_service.rs)、[`memory_retrieval_service.rs`](../apps/desktop/src-tauri/src/services/memory_retrieval_service.rs)
 - 工作台续接：[`checkpointOverview.ts`](../apps/desktop/src/features/workbench/checkpointOverview.ts)、[`useResearchContext.ts`](../apps/desktop/src/features/research-context/useResearchContext.ts)
+- 核心门禁：[`xiaoyan-core-gates-v1.json`](./evaluations/xiaoyan-core-gates-v1.json)、[`run_core_gates.py`](../scripts/core-agent-eval/run_core_gates.py)
 - 桌面助手状态：[`0.6.0-development-status.md`](./0.6.0-development-status.md)、[`0.6.0-desktop-assistant-regression.md`](./0.6.0-desktop-assistant-regression.md)
 
 ## 4. 北极星指标与护栏
@@ -478,6 +482,58 @@ scoring_notes: ""
 - 任一时刻只保留一个“下一轮唯一主假设”。
 
 ## 14. 迭代记录
+
+### 2026-08-13 · 本地论文参数证据守卫
+
+- 文档版本：`0.3.11`
+- 小妍版本 / commit：`0.6.0-dev.1` / `587b27fd` 后续工作区，分支 `codex/paper-discovery-enterprise-topic-3`
+- 迭代类型：产品证据链与核心门禁补证；不登记为 Codex 模型升级
+- 主假设：对 epoch/学习率这类窄范围论文参数问题，在全文上执行确定性抽取、未知项标记与章节定位，并阻止后续模型改写，可以消除关键事实编造风险并让用户打开依据
+- OpenCode 参照：沿用“先收窄能力、执行前裁决、结构化结果贯穿后续步骤”的设计取向；具体论文证据实现为小妍自有 service，不复制 OpenCode 代码
+- 评测数据版本：`XCG-core-agent-gates` v1，报告 `2026-08-13-deterministic-paper-fact-evidence`
+- 旧基线：核心有效均分 `2.25`，E02 为 2 分，未知硬失败断言 2 项
+- 新结果：核心有效均分 `2.5`，E02 `2 → 3`，未知硬失败断言 `2 → 0`；无场景退化，完整核心门禁和成对非退化门禁均通过
+- 代码与测试改动：新增 `paper_fact_service`，从合成全文提取训练轮数和学习率并生成 section locator；未知学习率明确标为“论文未报告”；路由只保留 paper_analyst + synthesis，跳过 retrieval/supervisor/Embedding；verified worker 输出绕过模型 synthesis 改写；Copilot 展示可打开的论文来源胶囊
+- 自动验证：E02 service 10 项、路由 11 项、来源 UI 2 项通过；核心门禁对比退出码 0；最终仓库级验证见本轮详细记录
+- 人工验收：合成全文确定性回放已完成；未扩展到 batch size、optimizer 等参数，相关混合问题会安全回退到现有 paper_analyst
+- 隐私与性能护栏：确定性路径不调用模型、联网检索或 Embedding；来源元数据只保存 paper asset ID、标题与 section locator，不复制论文正文；正则误报覆盖调度里程碑、表号、年份和重复数字定位反例
+- 决策：采纳窄范围确定性证据守卫；不将它表述为通用论文问答完成
+- 详细记录：[`2026-08-13-deterministic-paper-facts.md`](./evolution-runs/2026-08-13-deterministic-paper-facts.md)
+- 下一轮唯一主假设：用 5 组相同研究任务做“空白会话 vs checkpoint 续接”配对人工测试，可以判断当前 handoff 是否真正减少重复解释并产出可执行下一步；若多数任务无改善，停止继续扩展 checkpoint 自动化
+
+### 2026-08-13 · 请求级离线与长期记忆边界
+
+- 文档版本：`0.3.10`
+- 小妍版本 / commit：`0.6.0-dev.1` / `587b27fd` 后续工作区，分支 `codex/paper-discovery-enterprise-topic-3`
+- 迭代类型：产品安全边界与核心门禁补证；不登记为 Codex 模型升级
+- 主假设：把用户的“不要联网 / 不写入长期记忆”从路由提示提升为请求级策略，并在实际模型、Embedding、工具与持久化之前统一执行，可以消除仅收窄 Agent 路由仍可能外发或隐式写入的缺口
+- OpenCode 参照：vendored OpenCode 的 fetch 在 HTTP 请求前申请权限，write/edit 在修改前检查权限；小妍借鉴“副作用前统一裁决、执行层再防御”的顺序，不复制实现或权限模型
+- 评测数据版本：`XCG-core-agent-gates` v1，报告 `2026-08-13-local-only-and-memory-boundary`
+- 旧基线：代码证据均分 `2.25`，未知硬失败断言 3 项，其中 E08 的 `no_external_transfer` 未验证
+- 新结果：均分保持 `2.25`，未知硬失败断言 `3 → 2`，已补证 E08 `no_external_transfer`；无场景退化、成对非退化门禁通过，完整门禁仍因 E02 两项未知硬失败断言未通过
+- 代码与测试改动：新增 `ChatRequestPolicy` service；离线请求仅允许回环模型，跳过独立 Embedding 与后台向量回填，收窄并二次阻断外部工具；单次记忆退出贯穿 prompt、失败、完成与 checkpoint，并关闭未明确授权的笔记/实验持久化工具
+- 自动验证：Rust 全库 `171` 项通过、`4` 项忽略；核心门禁评分器 `8` 项通过；仓库级 `pnpm type-check` 通过；`pnpm lint` 0 error、18 个既有 warning；`cargo fmt --check` 与 `git diff --check` 通过
+- 人工验收：尚未运行真实模型输出回放；E08 的“解释风险且不复述敏感值”保持 `null`，不宣称输出脱敏已验证
+- 隐私与性能护栏：远程主模型或视觉模型在实际调用前被阻断；离线请求不调用独立 Embedding 或联网/嵌套模型工具；普通聊天作为用户主动创建的本地产品资产与长期记忆区分；用户明确要求保存为笔记/实验时仍视为单独授权
+- 决策：采纳请求级策略与纵深防御；完整核心门禁继续观察，不作为模型采纳或发布放行结论
+- 详细记录：[`2026-08-13-request-local-only-policy.md`](./evolution-runs/2026-08-13-request-local-only-policy.md)
+- 下一轮唯一主假设：在不把论文正文复制进评测报告的前提下，为 E02 增加可重复的本地论文参数证据抽取和端到端回放，可以同时验证“12 epochs”“学习率未报告”和 section locator，并消除剩余 2 项未知硬失败断言
+
+### 2026-08-13 · 核心 Agent 门禁与显式检索边界
+
+- 文档版本：`0.3.9`
+- 小妍版本 / commit：`0.6.0-dev.1` / `587b27fd` 后续工作区，分支 `codex/paper-discovery-enterprise-topic-3`
+- 迭代类型：评测基础设施与产品改进；不登记为 Codex 模型升级
+- 主假设：版本化核心门禁可以发现并阻止用户明确只用当前材料时仍启动外部研究步骤的路由回归
+- OpenCode 参照：借鉴任务工具收窄、会话状态和结构化事件契约；不复制代码，不扩大权限
+- 评测数据版本：`XCG-core-agent-gates` v1，E01/E02/E06/E08 合成夹具
+- 旧基线：代码证据均分 `1.75`；E06 因无条件加入 retrieval、literature_scout、survey 仅 1 分
+- 新结果：候选均分 `2.25`；E06 为 planner + synthesis，`1 → 3`；其余三项持平、已观察硬失败为 0
+- 代码与测试改动：新增三态评分器、基线/候选报告和门禁脚本；规则、Hybrid、LLM 路由统一遵守显式检索边界，并保留“排除博客但仍检索论文”的反例
+- 自动验证：Rust 路由 8 项、评分器 7 项、checkpoint 前端 8 项通过；成对非退化检查、仓库级 type-check、cargo fmt、py_compile、diff check 通过；完整核心门禁因未知硬失败断言按预期返回 3；lint 0 error、18 个既有 warning
+- 决策：采纳门禁与路由改进；E01/E02/E08 的未回放断言保留为 `null`，有效分不超过 2，完整核心门禁保持未通过，不宣称真实质量已验证
+- 详细记录：[`2026-08-13-core-agent-gates-and-routing.md`](./evolution-runs/2026-08-13-core-agent-gates-and-routing.md)
+- 下一轮唯一主假设：为 E01/E02/E08 增加可重复模型/人工回放，将未验证断言转为证据，并完成 E01 的 5 组配对人工基线
 
 ### 2026-08-11 · LitSearch 适用性审计与排序实验回退
 

@@ -119,10 +119,24 @@ CREATE TABLE IF NOT EXISTS research_interests (
     parent_id     TEXT,
     keywords      TEXT NOT NULL DEFAULT '[]',
     profile       TEXT,
+    hypothesis_card TEXT,
     learning_path TEXT,
     status        TEXT NOT NULL DEFAULT 'active',
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS research_hypothesis_versions (
+    id                   TEXT PRIMARY KEY,
+    hypothesis_id        TEXT NOT NULL,
+    research_interest_id TEXT NOT NULL REFERENCES research_interests(id) ON DELETE CASCADE,
+    version              INTEGER NOT NULL,
+    decision             TEXT NOT NULL DEFAULT 'draft',
+    card_json            TEXT NOT NULL DEFAULT '{}',
+    created_at           TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(research_interest_id, hypothesis_id, version)
+);
+CREATE INDEX IF NOT EXISTS idx_research_hypothesis_interest_version
+    ON research_hypothesis_versions(research_interest_id, hypothesis_id, version DESC);
 
 CREATE TABLE IF NOT EXISTS knowledge_notes (
     id                   TEXT PRIMARY KEY,
@@ -284,6 +298,22 @@ CREATE TABLE IF NOT EXISTS submission_diagnosis_reports (
 );
 CREATE INDEX IF NOT EXISTS idx_submission_diagnosis_submission_created
     ON submission_diagnosis_reports(submission_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS submission_review_feedback (
+    id            TEXT PRIMARY KEY,
+    submission_id TEXT NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+    review_run_id TEXT NOT NULL,
+    reviewer      TEXT NOT NULL DEFAULT '',
+    item_key      TEXT NOT NULL,
+    suggestion    TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL DEFAULT 'pending',
+    reason        TEXT NOT NULL DEFAULT '',
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(submission_id, review_run_id, item_key)
+);
+CREATE INDEX IF NOT EXISTS idx_submission_review_feedback_submission_status
+    ON submission_review_feedback(submission_id, status, updated_at DESC);
 ";
 
 pub const SUBMISSION_REVISION_TASKS_DDL: &str = "
@@ -367,6 +397,10 @@ CREATE TABLE IF NOT EXISTS memory_session_summaries (
     open_questions  TEXT NOT NULL DEFAULT '[]',
     next_steps      TEXT NOT NULL DEFAULT '[]',
     status          TEXT NOT NULL DEFAULT 'completed',
+    source          TEXT NOT NULL DEFAULT 'chat',
+    asset_snapshot  TEXT NOT NULL DEFAULT '{}',
+    review_status   TEXT NOT NULL DEFAULT 'pending',
+    review_note     TEXT NOT NULL DEFAULT '',
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -461,6 +495,7 @@ pub const SYNC_MUTABLE_TABLES: &[&str] = &[
     "agent_runs",
     "paper_parse_runs",
     "submission_diagnosis_reports",
+    "submission_review_feedback",
     "submission_revision_tasks",
     "memory_session_summaries",
     "research_interests",
@@ -490,6 +525,7 @@ pub async fn init_db(app_data_dir: &Path) -> Result<SqlitePool> {
     // Run schema – SQLite handles multiple statements via raw_sql
     sqlx::raw_sql(SCHEMA).execute(&pool).await?;
     ensure_research_interest_profile_column(&pool).await?;
+    ensure_research_interest_hypothesis_card_column(&pool).await?;
     ensure_research_interest_folder_name_column(&pool).await?;
     ensure_research_interest_partial_plan_column(&pool).await?;
     ensure_research_interest_parent_id_column(&pool).await?;
@@ -659,6 +695,7 @@ async fn ensure_schema(pool: &SqlitePool) -> Result<()> {
     // Run schema – SQLite handles multiple statements via raw_sql
     sqlx::raw_sql(SCHEMA).execute(pool).await?;
     ensure_research_interest_profile_column(pool).await?;
+    ensure_research_interest_hypothesis_card_column(pool).await?;
     ensure_research_interest_folder_name_column(pool).await?;
     ensure_research_interest_partial_plan_column(pool).await?;
     ensure_research_interest_parent_id_column(pool).await?;
@@ -866,6 +903,10 @@ async fn ensure_research_interest_profile_column(pool: &SqlitePool) -> Result<()
     Ok(())
 }
 
+async fn ensure_research_interest_hypothesis_card_column(pool: &SqlitePool) -> Result<()> {
+    ensure_table_column(pool, "research_interests", "hypothesis_card", "TEXT").await
+}
+
 async fn ensure_research_interest_partial_plan_column(pool: &SqlitePool) -> Result<()> {
     ensure_table_column(pool, "research_interests", "partial_plan", "TEXT").await
 }
@@ -982,6 +1023,34 @@ pub async fn ensure_memory_pipeline_tables(pool: &SqlitePool) -> Result<()> {
 
 pub async fn ensure_memory_checkpoint_tables(pool: &SqlitePool) -> Result<()> {
     sqlx::raw_sql(MEMORY_CHECKPOINT_DDL).execute(pool).await?;
+    ensure_table_column(
+        pool,
+        "memory_session_summaries",
+        "source",
+        "TEXT NOT NULL DEFAULT 'chat'",
+    )
+    .await?;
+    ensure_table_column(
+        pool,
+        "memory_session_summaries",
+        "asset_snapshot",
+        "TEXT NOT NULL DEFAULT '{}'",
+    )
+    .await?;
+    ensure_table_column(
+        pool,
+        "memory_session_summaries",
+        "review_status",
+        "TEXT NOT NULL DEFAULT 'pending'",
+    )
+    .await?;
+    ensure_table_column(
+        pool,
+        "memory_session_summaries",
+        "review_note",
+        "TEXT NOT NULL DEFAULT ''",
+    )
+    .await?;
     Ok(())
 }
 
@@ -1386,6 +1455,7 @@ mod tests {
 
         for (table, column) in [
             ("research_interests", "profile"),
+            ("research_interests", "hypothesis_card"),
             ("research_interests", "folder_name"),
             ("research_interests", "parent_id"),
             ("papers", "research_interest_id"),
@@ -1409,7 +1479,9 @@ mod tests {
             "paper_parse_runs",
             "memory_session_summaries",
             "memory_links",
+            "research_hypothesis_versions",
             "submission_diagnosis_reports",
+            "submission_review_feedback",
             "submission_revision_tasks",
             "experiment_records",
             "knowledge_graph_claims",
@@ -1423,6 +1495,13 @@ mod tests {
             "wiki_issues",
         ] {
             assert!(table_exists(&pool, table).await?, "{table}");
+        }
+
+        for column in ["source", "asset_snapshot", "review_status", "review_note"] {
+            assert!(
+                column_exists(&pool, "memory_session_summaries", column).await?,
+                "memory_session_summaries.{column}"
+            );
         }
 
         let folder_name: String = sqlx::query_scalar(

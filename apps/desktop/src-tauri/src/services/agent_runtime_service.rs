@@ -4,6 +4,7 @@ use crate::llm::{LlmClient, LlmMessage};
 use crate::services::agent_context_service::{build_agent_context, AgentContextRequest};
 use crate::services::agent_event_service::{emit_agent_event, AgentEvent, AgentPlanStep};
 use crate::services::agent_routing_service::{select_agents, RoutingPolicy};
+use crate::services::paper_fact_service::is_supported_paper_fact_question;
 use anyhow::Result;
 use std::collections::HashMap;
 
@@ -63,6 +64,14 @@ async fn run_xiaoyan_native_runtime(
     )
     .await;
     let selected = routing_result.agents;
+    let execution_max_steps = if request.context_type == "paper"
+        && is_supported_paper_fact_question(request.message)
+        && selected.iter().any(|agent| agent == "paper_analyst")
+    {
+        max_steps.max(2)
+    } else {
+        max_steps
+    };
     let agent_context = build_agent_context(AgentContextRequest {
         context_type: request.context_type,
         context_id: request.context_id,
@@ -109,7 +118,7 @@ async fn run_xiaoyan_native_runtime(
         agent_context.parts,
         request.history,
         selected,
-        max_steps,
+        execution_max_steps,
     )
     .await?;
 

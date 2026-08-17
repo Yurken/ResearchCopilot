@@ -51,11 +51,13 @@ pub async fn collect_chat_sources(
     settings: &HashMap<String, String>,
     message: &str,
     query_embedding: Option<&[f32]>,
+    allow_embedding: bool,
 ) -> Vec<Value> {
     // 复用上游已算好的 query 向量；缺省时再自行 embed，避免一轮对话重复向量化。
     let embedding = match query_embedding {
         Some(value) => Some(value.to_vec()),
-        None => embed_query(settings, message).await,
+        None if allow_embedding => embed_query(settings, message).await,
+        None => None,
     };
 
     let top_k = settings

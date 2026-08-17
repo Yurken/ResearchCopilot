@@ -4,15 +4,18 @@ pub mod agent_routing_service;
 pub mod agent_runtime_service;
 pub mod agent_tool_service;
 pub mod chat_context_service;
+pub mod chat_request_policy;
 pub mod evidence_service;
 pub mod memory_checkpoint_service;
 pub mod memory_privacy_service;
 pub mod memory_retrieval_service;
+pub mod paper_fact_service;
 pub mod paper_parser_service;
 pub mod research_context_service;
 pub mod settings_service;
 pub mod source_service;
 pub mod submission_diagnosis_service;
+pub mod submission_feedback_service;
 pub mod submission_revision_service;
 pub mod submission_service;
 

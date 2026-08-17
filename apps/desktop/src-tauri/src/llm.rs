@@ -216,6 +216,12 @@ pub(crate) fn anthropic_auth_header(base_url: &str, api_key: &str) -> (&'static 
 }
 
 impl LlmClient {
+    pub fn base_url(&self) -> &str {
+        match self {
+            Self::OpenAI { base_url, .. } | Self::Anthropic { base_url, .. } => base_url,
+        }
+    }
+
     pub fn from_settings(s: &HashMap<String, String>) -> Result<Self> {
         let provider = s
             .get("llm_provider")

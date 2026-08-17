@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildCheckpointAgendaItem,
   buildCheckpointHandoffItem,
+  hasActionableCheckpoint,
 } from "../../../features/workbench/checkpointOverview";
 import type { WorkbenchCheckpointItem } from "../../../features/workbench/shared";
 import {
@@ -61,5 +62,12 @@ describe("workbench checkpoint actions", () => {
 
     expect(item?.action.label).toBe("恢复任务");
     expect(item?.tone).toBe("rust");
+  });
+
+  it("撤回 checkpoint 不再出现在续接入口", () => {
+    const withdrawn = checkpoint({ reviewStatus: "withdrawn" });
+    expect(buildCheckpointAgendaItem([withdrawn])).toBeNull();
+    expect(buildCheckpointHandoffItem([withdrawn])).toBeNull();
+    expect(hasActionableCheckpoint([withdrawn])).toBe(false);
   });
 });

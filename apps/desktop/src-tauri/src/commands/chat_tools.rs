@@ -259,8 +259,21 @@ fn all_tool_definitions() -> Vec<ToolDefinition> {
     ]
 }
 
+fn tool_requires_external_access(name: &str) -> bool {
+    matches!(
+        name,
+        "web_search" | "generate_survey" | "generate_plan" | "search_arxiv"
+    )
+}
+
+fn tool_creates_persistent_asset(name: &str) -> bool {
+    matches!(name, "create_note" | "create_experiment")
+}
+
 pub fn build_chat_tools(
     settings: &std::collections::HashMap<String, String>,
+    allow_external_tools: bool,
+    allow_persistent_tools: bool,
 ) -> Vec<ToolDefinition> {
     let mut tools: Vec<ToolDefinition> = vec![];
 
@@ -268,11 +281,17 @@ pub fn build_chat_tools(
         .get("web_search_enabled")
         .map(|v| v == "true")
         .unwrap_or(false);
-    if web_search_enabled {
+    if allow_external_tools && web_search_enabled {
         tools.push(crate::llm::web_search_tool_definition());
     }
 
     tools.extend(all_tool_definitions());
+    if !allow_external_tools {
+        tools.retain(|tool| !tool_requires_external_access(&tool.name));
+    }
+    if !allow_persistent_tools {
+        tools.retain(|tool| !tool_creates_persistent_asset(&tool.name));
+    }
     tools
 }
 
@@ -284,7 +303,16 @@ pub async fn dispatch_tool(
     settings: &std::collections::HashMap<String, String>,
     tool_call: &ToolCall,
     request_id: &str,
+    allow_external_tools: bool,
+    allow_persistent_tools: bool,
 ) -> Result<String, String> {
+    if !allow_external_tools && tool_requires_external_access(&tool_call.name) {
+        return Err("本次请求已启用离线边界，不能执行联网或额外模型工具。".to_string());
+    }
+    if !allow_persistent_tools && tool_creates_persistent_asset(&tool_call.name) {
+        return Err("本次请求已关闭长期记忆，且用户没有明确要求创建持久化产物。".to_string());
+    }
+
     match tool_call.name.as_str() {
         "search_knowledge" => dispatch_search_knowledge(db, tool_call).await,
         "search_papers" => dispatch_search_papers(db, tool_call).await,
@@ -299,6 +327,66 @@ pub async fn dispatch_tool(
         "query_journal" => dispatch_query_journal(tool_call).await,
         "lookup_ccf" => dispatch_lookup_ccf(tool_call).await,
         _ => Err(format!("未知工具: {}", tool_call.name)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_chat_tools;
+    use std::collections::HashMap;
+
+    fn tool_names(allow_external_tools: bool, allow_persistent_tools: bool) -> Vec<String> {
+        let settings = HashMap::from([("web_search_enabled".to_string(), "true".to_string())]);
+        build_chat_tools(&settings, allow_external_tools, allow_persistent_tools)
+            .into_iter()
+            .map(|tool| tool.name)
+            .collect()
+    }
+
+    #[test]
+    fn offline_boundary_removes_every_external_or_nested_model_tool() {
+        let names = tool_names(false, true);
+
+        for forbidden in [
+            "web_search",
+            "search_arxiv",
+            "generate_survey",
+            "generate_plan",
+        ] {
+            assert!(!names.iter().any(|name| name == forbidden));
+        }
+        for local in [
+            "search_knowledge",
+            "search_papers",
+            "search_experiments",
+            "query_journal",
+            "lookup_ccf",
+        ] {
+            assert!(names.iter().any(|name| name == local));
+        }
+    }
+
+    #[test]
+    fn ordinary_request_keeps_configured_external_tools() {
+        let names = tool_names(true, true);
+
+        for expected in [
+            "web_search",
+            "search_arxiv",
+            "generate_survey",
+            "generate_plan",
+        ] {
+            assert!(names.iter().any(|name| name == expected));
+        }
+    }
+
+    #[test]
+    fn memory_boundary_removes_implicit_persistent_asset_tools() {
+        let names = tool_names(true, false);
+
+        assert!(!names.iter().any(|name| name == "create_note"));
+        assert!(!names.iter().any(|name| name == "create_experiment"));
+        assert!(names.iter().any(|name| name == "search_knowledge"));
     }
 }
 

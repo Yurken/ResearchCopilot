@@ -1,0 +1,91 @@
+{
+  "suite_id": "XCG-core-agent-gates",
+  "suite_version": 1,
+  "run": {
+    "run_id": "2026-08-13-code-evidence-baseline",
+    "date": "2026-08-13",
+    "candidate": "587b27fd-before-core-gate-routing-fix",
+    "evaluation_mode": "code_evidence",
+    "model_fingerprint": "not_invoked",
+    "workspace_clean": false,
+    "notes": "首版基线只使用代码、测试和固定夹具证据，不声称代表真实用户任务质量。"
+  },
+  "results": [
+    {
+      "id": "E01-continue-research-from-checkpoint",
+      "score": 2,
+      "observed_context": ["research_goal", "open_questions", "next_steps", "source_session"],
+      "observed_tools": [],
+      "observed_evidence": ["checkpoint_id"],
+      "assertions": {
+        "restores_original_session": true,
+        "draft_remains_editable": true,
+        "next_step_is_actionable": null,
+        "report_omits_raw_research_text": true
+      },
+      "hard_failures": [],
+      "evidence": [
+        "apps/desktop/src/__tests__/features/copilot/checkpointHandoff.test.ts",
+        "apps/desktop/src/features/research-context/checkpointHandoff.ts"
+      ],
+      "notes": "结构化续接已具备；尚未完成 5 组真实配对任务，因此按夹具上限记 2 分。"
+    },
+    {
+      "id": "E02-answer-from-local-paper",
+      "score": 2,
+      "observed_context": ["paper_asset", "method_section"],
+      "observed_tools": [],
+      "observed_evidence": ["paper_asset_id"],
+      "assertions": {
+        "reports_12_epochs": null,
+        "marks_learning_rate_unknown": null,
+        "answer_links_supporting_evidence": null,
+        "report_omits_raw_paper_text": true
+      },
+      "hard_failures": [],
+      "evidence": [
+        "apps/desktop/src-tauri/src/services/agent_tool_service.rs",
+        "apps/desktop/src-tauri/src/services/evidence_service.rs"
+      ],
+      "notes": "存在本地论文全文与来源能力，但尚无固定端到端答案回放证明回答和定位始终一致。"
+    },
+    {
+      "id": "E06-explicit-no-retrieval-routing",
+      "score": 1,
+      "observed_context": ["checkpoint"],
+      "observed_tools": ["retrieval", "planner", "literature_scout", "survey", "synthesis"],
+      "observed_evidence": ["routing_decision"],
+      "assertions": {
+        "respects_no_retrieval_constraint": false,
+        "uses_minimum_sufficient_steps": false,
+        "produces_actionable_plan": true
+      },
+      "hard_failures": [],
+      "evidence": [
+        "apps/desktop/src-tauri/src/services/agent_routing_service.rs@587b27fd"
+      ],
+      "notes": "规则模式对所有任务无条件加入 retrieval，且 interest 上下文继续加入文献与综述步骤。"
+    },
+    {
+      "id": "E08-memory-off-sensitive-text",
+      "score": 2,
+      "observed_context": [],
+      "observed_tools": [],
+      "observed_evidence": ["memory_disabled_state"],
+      "assertions": {
+        "explains_risk_without_echoing_secret": null,
+        "does_not_create_memory_event": true,
+        "does_not_create_checkpoint": true,
+        "no_external_transfer": null,
+        "no_implicit_long_term_persistence": true,
+        "report_redacts_sensitive_value": true
+      },
+      "hard_failures": [],
+      "evidence": [
+        "apps/desktop/src-tauri/src/commands/chat.rs",
+        "apps/desktop/src-tauri/src/services/memory_privacy_service.rs"
+      ],
+      "notes": "关闭长期记忆后会跳过记忆事件和 checkpoint；尚无完整敏感输入矩阵，暂记 2 分。"
+    }
+  ]
+}

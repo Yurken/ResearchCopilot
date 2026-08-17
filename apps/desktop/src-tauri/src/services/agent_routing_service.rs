@@ -3,6 +3,8 @@ use crate::llm::{resolve_model, resolve_temperature, LlmClient, LlmMessage};
 use serde::Deserialize;
 use std::collections::HashMap;
 
+use super::paper_fact_service::is_supported_paper_fact_question;
+
 #[derive(Deserialize, Default)]
 struct RoutingDecision {
     agents: Vec<String>,
@@ -50,7 +52,28 @@ pub async fn select_agents(
     max_steps: usize,
     policy: RoutingPolicy,
 ) -> RoutingResult {
+    if context_type == "paper"
+        && enabled.iter().any(|agent| agent == "paper_analyst")
+        && is_supported_paper_fact_question(message)
+    {
+        return RoutingResult {
+            agents: append_synthesis(vec!["paper_analyst".to_string()], enabled),
+            reasoning: Some(
+                "当前论文全文足以回答窄范围参数问题，使用确定性证据守卫避免补全未报告值。"
+                    .to_string(),
+            ),
+        };
+    }
     let rule_selected = select_agents_by_rule(message, context_type, enabled, max_steps);
+    if forbids_research_augmentation(message) {
+        return RoutingResult {
+            agents: append_synthesis(
+                apply_explicit_research_boundary(rule_selected, message),
+                enabled,
+            ),
+            reasoning: Some("遵循用户的显式检索边界，仅保留本地处理步骤。".to_string()),
+        };
+    }
 
     let (selected, reasoning) = match policy {
         RoutingPolicy::Rule => (rule_selected.clone(), None),
@@ -97,9 +120,74 @@ pub async fn select_agents(
     };
 
     RoutingResult {
-        agents: append_synthesis(selected, enabled),
+        agents: append_synthesis(apply_explicit_research_boundary(selected, message), enabled),
         reasoning,
     }
+}
+
+/// 用户明确要求仅使用当前材料时，研究增强检索和面向外部文献的步骤属于硬边界。
+/// 该约束在规则与 LLM 路由合并后再次应用，避免 supervisor 覆盖用户意图。
+fn apply_explicit_research_boundary(selected: Vec<String>, message: &str) -> Vec<String> {
+    if !forbids_research_augmentation(message) {
+        return selected;
+    }
+
+    selected
+        .into_iter()
+        .filter(|agent| !matches!(agent.as_str(), "retrieval" | "literature_scout" | "survey"))
+        .collect()
+}
+
+fn forbids_research_augmentation(message: &str) -> bool {
+    let rejects_research_augmentation = [
+        "不要检索或联网",
+        "无需检索或联网",
+        "不需要检索或联网",
+        "不要搜索或联网",
+        "无需搜索或联网",
+        "不需要搜索或联网",
+    ]
+    .iter()
+    .any(|constraint| message.contains(constraint));
+    let rejects_search = [
+        "不要检索",
+        "无需检索",
+        "不需要检索",
+        "不要搜索",
+        "无需搜索",
+        "不需要搜索",
+    ]
+    .iter()
+    .any(|constraint| message.contains(constraint));
+    let rejects_network = ["不要联网", "无需联网", "不需要联网"]
+        .iter()
+        .any(|constraint| message.contains(constraint));
+    let requests_local_retrieval = [
+        "本地知识库",
+        "本地论文库",
+        "本地检索",
+        "离线检索",
+        "已有论文库",
+        "已导入论文",
+    ]
+    .iter()
+    .any(|constraint| message.contains(constraint));
+    let limits_to_existing_material = [
+        "只根据当前",
+        "仅根据当前",
+        "只基于当前",
+        "仅基于当前",
+        "只用已有",
+        "仅用已有",
+        "只使用已有",
+        "仅使用已有",
+    ]
+    .iter()
+    .any(|constraint| message.contains(constraint));
+
+    rejects_research_augmentation
+        || (rejects_search && limits_to_existing_material)
+        || (rejects_network && !requests_local_retrieval)
 }
 
 fn select_agents_by_rule(
@@ -120,6 +208,7 @@ fn select_agents_by_rule(
 
     let is_interest_context = context_type == "interest";
     let is_paper_context = context_type == "paper";
+    let research_augmentation_forbidden = forbids_research_augmentation(message);
     let asks_for_planning = contains_any(
         message,
         &[
@@ -216,14 +305,21 @@ fn select_agents_by_rule(
         || contains_any(message, &["研究工作台", "路线推进", "路线修订", "开题准备"]);
 
     let mut agents: Vec<String> = Vec::new();
-    add(&mut agents, enabled, "retrieval");
+    if !research_augmentation_forbidden {
+        add(&mut agents, enabled, "retrieval");
+    }
     if is_interest_context || asks_for_planning {
         add(&mut agents, enabled, "planner");
     }
-    if is_interest_context || asks_for_literature || asks_for_survey || asks_for_related_work {
+    if !research_augmentation_forbidden
+        && (is_interest_context || asks_for_literature || asks_for_survey || asks_for_related_work)
+    {
         add(&mut agents, enabled, "literature_scout");
     }
-    if is_research_workbench_task || asks_for_survey || (is_paper_context && asks_for_related_work)
+    if !research_augmentation_forbidden
+        && (is_research_workbench_task
+            || asks_for_survey
+            || (is_paper_context && asks_for_related_work))
     {
         add(&mut agents, enabled, "survey");
     }
@@ -233,7 +329,10 @@ fn select_agents_by_rule(
     if asks_for_reproduction {
         add(&mut agents, enabled, "reproduction");
     }
-    normalize_selected_agents(agents, enabled, max_steps)
+    apply_explicit_research_boundary(
+        normalize_selected_agents(agents, enabled, max_steps),
+        message,
+    )
 }
 
 async fn select_agents_by_llm(
@@ -363,7 +462,12 @@ fn append_synthesis(mut selected: Vec<String>, enabled: &[String]) -> Vec<String
 
 #[cfg(test)]
 mod tests {
-    use super::{merge_selected_agents, normalize_selected_agents, select_agents_by_rule};
+    use super::{
+        apply_explicit_research_boundary, merge_selected_agents, normalize_selected_agents,
+        select_agents, select_agents_by_rule, RoutingPolicy,
+    };
+    use crate::llm::LlmClient;
+    use std::collections::HashMap;
 
     fn enabled_agents() -> Vec<String> {
         [
@@ -419,6 +523,31 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn paper_fact_question_skips_retrieval_and_supervisor() {
+        let client = LlmClient::OpenAI {
+            base_url: "http://127.0.0.1:9/v1".to_string(),
+            api_key: String::new(),
+            chat_model: "never-called".to_string(),
+            embed_model: "never-called".to_string(),
+        };
+        let result = select_agents(
+            &client,
+            &HashMap::new(),
+            "这篇论文训练了多少 epoch？学习率是多少？",
+            "paper",
+            &enabled_agents(),
+            6,
+            RoutingPolicy::Hybrid,
+        )
+        .await;
+
+        assert_eq!(
+            result.agents,
+            vec!["paper_analyst".to_string(), "synthesis".to_string()]
+        );
+    }
+
     #[test]
     fn hybrid_merge_keeps_rule_baseline() {
         let merged = merge_selected_agents(
@@ -449,5 +578,95 @@ mod tests {
         let selected =
             normalize_selected_agents(vec!["retrieval".to_string()], &enabled_agents(), 0);
         assert_eq!(selected, vec!["retrieval".to_string()]);
+    }
+
+    #[test]
+    fn explicit_no_retrieval_keeps_only_local_planning_steps() {
+        let selected = select_agents_by_rule(
+            "不要检索或联网，只根据当前 checkpoint 整理下一步计划",
+            "interest",
+            &enabled_agents(),
+            6,
+        );
+
+        assert_eq!(selected, vec!["planner".to_string()]);
+    }
+
+    #[test]
+    fn explicit_no_retrieval_is_enforced_after_llm_merge() {
+        let selected = apply_explicit_research_boundary(
+            vec![
+                "retrieval".to_string(),
+                "planner".to_string(),
+                "literature_scout".to_string(),
+                "survey".to_string(),
+            ],
+            "无需搜索，只用已有材料给出计划",
+        );
+
+        assert_eq!(selected, vec!["planner".to_string()]);
+    }
+
+    #[test]
+    fn source_filter_is_not_mistaken_for_no_retrieval_boundary() {
+        let selected = select_agents_by_rule(
+            "不要搜索博客，只检索论文并做论文推荐",
+            "none",
+            &enabled_agents(),
+            6,
+        );
+
+        assert!(selected.contains(&"retrieval".to_string()));
+        assert!(selected.contains(&"literature_scout".to_string()));
+    }
+
+    #[test]
+    fn offline_request_can_still_use_local_retrieval() {
+        let selected = select_agents_by_rule(
+            "不要联网，请从本地知识库检索相关证据",
+            "none",
+            &enabled_agents(),
+            6,
+        );
+
+        assert!(selected.contains(&"retrieval".to_string()));
+    }
+
+    #[test]
+    fn offline_sensitive_explanation_uses_only_synthesis() {
+        let selected = select_agents_by_rule(
+            "不要联网。请说明文本中 [SYNTHETIC_SECRET] 泄露的风险，但不要把它写入长期记忆。",
+            "none",
+            &enabled_agents(),
+            6,
+        );
+
+        assert!(selected.is_empty());
+    }
+
+    #[tokio::test]
+    async fn public_router_enforces_offline_boundary_before_supervisor() {
+        let client = LlmClient::OpenAI {
+            base_url: "https://should-not-be-called.invalid/v1".to_string(),
+            api_key: String::new(),
+            chat_model: "unused".to_string(),
+            embed_model: "unused".to_string(),
+        };
+        let result = select_agents(
+            &client,
+            &std::collections::HashMap::new(),
+            "不要联网。请说明文本中 [SYNTHETIC_SECRET] 泄露的风险，但不要把它写入长期记忆。",
+            "general",
+            &enabled_agents(),
+            6,
+            RoutingPolicy::Hybrid,
+        )
+        .await;
+
+        assert_eq!(result.agents, vec!["synthesis".to_string()]);
+        assert_eq!(
+            result.reasoning.as_deref(),
+            Some("遵循用户的显式检索边界，仅保留本地处理步骤。")
+        );
     }
 }

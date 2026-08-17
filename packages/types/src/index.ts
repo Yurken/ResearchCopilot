@@ -147,9 +147,37 @@ export interface ResearchInterest {
   parent_id?: string;
   keywords?: string[];
   profile?: ResearchInterestProfile;
+  hypothesis_card?: ResearchHypothesisCard;
   learning_path?: LearningPath;
   status: string;
   created_at: string;
+}
+
+export type ResearchHypothesisDecision = "draft" | "adopted" | "revised" | "discarded";
+
+export interface ResearchHypothesisCard {
+  id: string;
+  version: number;
+  parent_version?: number;
+  decision: ResearchHypothesisDecision;
+  decision_note?: string;
+  title: string;
+  hypothesis: string;
+  rationale: string;
+  evidence: string[];
+  counter_evidence: string[];
+  falsification: string;
+  validation_steps: string[];
+  uncertainties: string[];
+  keywords: string[];
+  created_at: string;
+  updated_at: string;
+  origin?: {
+    hypothesis: string;
+    falsification: string;
+    validation_steps: string[];
+    captured_at: string;
+  };
 }
 
 export interface ResearchInterestProfile {
@@ -223,6 +251,14 @@ export interface LearningPath {
   research_directions?: Array<{ direction: string; description: string; open_problems: string[] }>;
   tools_and_frameworks?: string[];
   communities?: string[];
+  hypothesis_validation?: {
+    hypothesis: string;
+    tasks: string[];
+    control_plan: string;
+    decision_metrics: string[];
+    stop_conditions: string[];
+    evidence_boundary: string[];
+  };
 }
 
 export interface CcfEntry {

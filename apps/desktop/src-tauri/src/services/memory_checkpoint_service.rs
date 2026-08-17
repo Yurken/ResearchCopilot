@@ -32,6 +32,18 @@ struct CheckpointDraft {
     status: &'static str,
 }
 
+pub struct ResearchAssetCheckpointInput<'a> {
+    pub context_type: &'a str,
+    pub context_id: &'a str,
+    pub action: &'a str,
+    pub goal: &'a str,
+    pub summary: &'a str,
+    pub completed_items: Vec<String>,
+    pub open_questions: Vec<String>,
+    pub next_steps: Vec<String>,
+    pub asset_snapshot: Value,
+}
+
 fn sqlite_now() -> String {
     chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
@@ -73,8 +85,34 @@ fn entity_type_for_context(context_type: &str) -> Option<&'static str> {
     match context_type {
         "interest" => Some("research_interest"),
         "paper" => Some("paper"),
+        "experiment" => Some("experiment"),
         _ => None,
     }
+}
+
+pub fn research_interest_asset_snapshot(
+    topic: &str,
+    keywords: &[String],
+    profile: Option<&Value>,
+    hypothesis_card: Option<&Value>,
+    learning_path: Option<&Value>,
+) -> Value {
+    json!({
+        "topic": topic,
+        "keywords": keywords,
+        "profile": profile,
+        "hypothesis_card": hypothesis_card,
+        "learning_path": learning_path,
+    })
+}
+
+pub fn experiment_asset_snapshot(title: &str, config: &Value, result: &str, notes: &str) -> Value {
+    json!({
+        "title": title,
+        "config": config,
+        "result": result,
+        "notes": notes,
+    })
 }
 
 fn build_completion_draft(input: &ChatCheckpointInput<'_>) -> CheckpointDraft {
@@ -163,6 +201,59 @@ async fn insert_checkpoint(
     Ok(checkpoint_id)
 }
 
+pub async fn record_research_asset_checkpoint(
+    db: &SqlitePool,
+    input: ResearchAssetCheckpointInput<'_>,
+) -> Result<String> {
+    let session_id = format!("asset:{}:{}", input.context_type, input.context_id);
+    let now = sqlite_now();
+    sqlx::query(
+        "INSERT OR IGNORE INTO chat_sessions (id, title, context_type, context_id, created_at, updated_at)
+         VALUES (?, ?, 'asset_checkpoint', ?, ?, ?)",
+    )
+    .bind(&session_id)
+    .bind(format!("研究资产自动记录：{}", preview_text(input.goal, 80)))
+    .bind(input.context_id)
+    .bind(&now)
+    .bind(&now)
+    .execute(db)
+    .await?;
+
+    let checkpoint_id = Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO memory_session_summaries (
+            id, session_id, request_id, context_type, context_id, goal, summary,
+            completed_items, open_questions, next_steps, status, source, asset_snapshot,
+            review_status, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, 'pending', ?, ?)",
+    )
+    .bind(&checkpoint_id)
+    .bind(&session_id)
+    .bind(input.action)
+    .bind(input.context_type)
+    .bind(input.context_id)
+    .bind(preview_text(input.goal, 160))
+    .bind(preview_text(input.summary, 600))
+    .bind(serde_json::to_string(&input.completed_items)?)
+    .bind(serde_json::to_string(&input.open_questions)?)
+    .bind(serde_json::to_string(&input.next_steps)?)
+    .bind("asset_auto")
+    .bind(serde_json::to_string(&input.asset_snapshot)?)
+    .bind(&now)
+    .bind(&now)
+    .execute(db)
+    .await?;
+    insert_memory_link(
+        db,
+        &checkpoint_id,
+        entity_type_for_context(input.context_type).unwrap_or("research_asset"),
+        input.context_id,
+        "asset_change",
+    )
+    .await?;
+    Ok(checkpoint_id)
+}
+
 async fn insert_memory_link(
     db: &SqlitePool,
     checkpoint_id: &str,
@@ -226,7 +317,8 @@ pub fn parse_checkpoint_list(raw: &str) -> Vec<String> {
 pub async fn list_recent_checkpoints(db: &SqlitePool, limit: i64) -> Result<Value> {
     let rows = sqlx::query(
         "SELECT id, session_id, request_id, context_type, context_id, goal, summary,
-                completed_items, open_questions, next_steps, status, created_at, updated_at
+                completed_items, open_questions, next_steps, status, source, asset_snapshot,
+                review_status, review_note, created_at, updated_at
          FROM memory_session_summaries
          ORDER BY updated_at DESC
          LIMIT ?",
@@ -250,6 +342,10 @@ pub async fn list_recent_checkpoints(db: &SqlitePool, limit: i64) -> Result<Valu
                 "open_questions": parse_checkpoint_list(&row.get::<String, _>("open_questions")),
                 "next_steps": parse_checkpoint_list(&row.get::<String, _>("next_steps")),
                 "status": row.get::<String, _>("status"),
+                "source": row.get::<String, _>("source"),
+                "asset_snapshot": serde_json::from_str::<Value>(&row.get::<String, _>("asset_snapshot")).unwrap_or_else(|_| json!({})),
+                "review_status": row.get::<String, _>("review_status"),
+                "review_note": row.get::<String, _>("review_note"),
                 "created_at": row.get::<String, _>("created_at"),
                 "updated_at": row.get::<String, _>("updated_at"),
             })
@@ -287,7 +383,12 @@ pub fn checkpoint_to_memory_line(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_completion_draft, checkpoint_to_memory_line, ChatCheckpointInput};
+    use super::{
+        build_completion_draft, checkpoint_to_memory_line, list_recent_checkpoints,
+        record_research_asset_checkpoint, ChatCheckpointInput, ResearchAssetCheckpointInput,
+    };
+    use serde_json::json;
+    use sqlx::sqlite::SqlitePoolOptions;
 
     #[test]
     fn completion_checkpoint_records_source_count_and_next_step() {
@@ -318,5 +419,43 @@ mod tests {
         );
 
         assert!(line.contains("继续阅读核心论文"));
+    }
+
+    #[tokio::test]
+    async fn asset_checkpoint_persists_snapshot_and_pending_review() -> anyhow::Result<()> {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await?;
+        sqlx::raw_sql("PRAGMA foreign_keys = ON; CREATE TABLE chat_sessions (id TEXT PRIMARY KEY, title TEXT, context_type TEXT, context_id TEXT, created_at TEXT, updated_at TEXT);")
+            .execute(&pool).await?;
+        sqlx::raw_sql("CREATE TABLE memory_observations (id TEXT PRIMARY KEY);")
+            .execute(&pool)
+            .await?;
+        sqlx::raw_sql(crate::db::MEMORY_CHECKPOINT_DDL)
+            .execute(&pool)
+            .await?;
+        let id = record_research_asset_checkpoint(
+            &pool,
+            ResearchAssetCheckpointInput {
+                context_type: "interest",
+                context_id: "interest-1",
+                action: "interest.plan_completed",
+                goal: "验证假设",
+                summary: "规划完成",
+                completed_items: vec!["生成计划".into()],
+                open_questions: vec!["数据量".into()],
+                next_steps: vec!["执行对照".into()],
+                asset_snapshot: json!({"topic":"Graph RAG","version":2}),
+            },
+        )
+        .await?;
+        let listed = list_recent_checkpoints(&pool, 8).await?;
+        let checkpoint = &listed["checkpoints"][0];
+        assert_eq!(checkpoint["id"], id);
+        assert_eq!(checkpoint["source"], "asset_auto");
+        assert_eq!(checkpoint["review_status"], "pending");
+        assert_eq!(checkpoint["asset_snapshot"]["version"], 2);
+        Ok(())
     }
 }

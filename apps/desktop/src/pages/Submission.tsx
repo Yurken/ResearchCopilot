@@ -207,7 +207,8 @@ export default function Submission() {
     const imported = await aiReview.importResults(review.round);
     if (!imported) return;
     if (imported.submissionId === review.subId) void review.reloadReview();
-    setFeedback(`已归档 ${imported.count} 条多视角审稿意见`);
+    const summary = imported.feedbackSummary;
+    setFeedback(`已归档 ${imported.count} 条多视角审稿意见；价值反馈：采纳 ${summary.adopted}、完成 ${summary.done}、忽略 ${summary.ignored}`);
   };
 
   // Cover letter：打开弹窗即触发流式生成（监听器写入 coverLetterText）
@@ -415,6 +416,10 @@ export default function Submission() {
         onImport={handleImportAiReview}
         onGenerate={aiReview.generate}
         onClose={aiReview.close}
+        feedback={aiReview.feedback}
+        feedbackSavingKey={aiReview.feedbackSavingKey}
+        feedbackSummary={aiReview.feedbackSummary}
+        onFeedback={aiReview.saveFeedback}
       />
       <SaveVersionModal
         open={showSaveModal}

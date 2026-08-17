@@ -7,9 +7,11 @@ import {
   getDominantVerdict,
   type MockReviewInput,
   type MockReviewerResult,
+  type ReviewFeedbackStatus,
   type ReviewVerdict,
 } from "./shared";
 import { openLink } from "../../lib/links";
+import ReviewSuggestionFeedbackPanel from "./ReviewSuggestionFeedbackPanel";
 
 interface MockReviewModalProps {
   open: boolean;
@@ -26,6 +28,10 @@ interface MockReviewModalProps {
   onGenerate: () => void;
   onDiagnose?: () => void | Promise<void>;
   diagnosisLoading?: boolean;
+  feedback: Record<string, { status: ReviewFeedbackStatus; reason: string }>;
+  feedbackSavingKey: string | null;
+  feedbackSummary: Record<ReviewFeedbackStatus, number>;
+  onFeedback: (result: MockReviewerResult, suggestionIndex: number, status: Exclude<ReviewFeedbackStatus, "pending">, reason?: string) => void | Promise<unknown>;
 }
 
 export default function MockReviewModal({
@@ -43,6 +49,10 @@ export default function MockReviewModal({
   onGenerate,
   onDiagnose,
   diagnosisLoading,
+  feedback,
+  feedbackSavingKey,
+  feedbackSummary,
+  onFeedback,
 }: MockReviewModalProps) {
   if (!open) {
     return null;
@@ -216,6 +226,14 @@ export default function MockReviewModal({
                   </span>
                 </div>
               ) : null}
+              {(feedbackSummary.adopted + feedbackSummary.ignored + feedbackSummary.done) > 0 ? (
+                <div className="flex flex-wrap gap-2 rounded-2xl px-3 py-2 text-xs text-ink-secondary" style={{ background: "var(--rc-card-inset-bg)" }}>
+                  <span>累计反馈</span>
+                  <span className="text-apple-blue">采纳 {feedbackSummary.adopted}</span>
+                  <span className="text-[#34C759]">完成 {feedbackSummary.done}</span>
+                  <span className="text-apple-red">忽略 {feedbackSummary.ignored}</span>
+                </div>
+              ) : null}
 
               {mockReviewResult?.map((result, index) => {
                 const verdictStyle = VERDICT_CFG[result.verdict];
@@ -255,6 +273,24 @@ export default function MockReviewModal({
                         className="text-sm leading-7 text-ink-secondary"
                         onLinkClick={openLink}
                       />
+                      {result.suggestions.length > 0 ? (
+                        <div className="mt-3 space-y-2 border-t pt-3" style={{ borderColor: "var(--rc-border)" }}>
+                          <p className="text-xs font-semibold text-ink-secondary">建议价值反馈</p>
+                          {result.suggestions.map((suggestion, suggestionIndex) => {
+                            const key = `${result.id}:${suggestionIndex}`;
+                            const current = feedback[key];
+                            return (
+                              <ReviewSuggestionFeedbackPanel
+                                key={key}
+                                suggestion={suggestion}
+                                current={current}
+                                saving={feedbackSavingKey === key}
+                                onFeedback={(status, reason) => onFeedback(result, suggestionIndex, status, reason)}
+                              />
+                            );
+                          })}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 );

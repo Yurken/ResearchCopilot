@@ -18,6 +18,10 @@ export interface WorkbenchCheckpointItem {
   openQuestions: string[];
   nextSteps: string[];
   status: string;
+  source?: string;
+  assetSnapshot?: Record<string, unknown>;
+  reviewStatus?: "pending" | "confirmed" | "corrected" | "withdrawn";
+  reviewNote?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -34,6 +38,10 @@ export interface WorkbenchCheckpointRow {
   open_questions: string[];
   next_steps: string[];
   status: string;
+  source?: string;
+  asset_snapshot?: Record<string, unknown>;
+  review_status?: "pending" | "confirmed" | "corrected" | "withdrawn";
+  review_note?: string;
   created_at: string;
   updated_at: string;
 }
@@ -98,6 +106,10 @@ export function rowToWorkbenchCheckpoint(row: WorkbenchCheckpointRow): Workbench
     openQuestions: listFromUnknown(row.open_questions),
     nextSteps: listFromUnknown(row.next_steps),
     status: row.status || "completed",
+    source: row.source || "chat",
+    assetSnapshot: row.asset_snapshot ?? {},
+    reviewStatus: row.review_status ?? "pending",
+    reviewNote: row.review_note ?? "",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

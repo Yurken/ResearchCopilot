@@ -69,6 +69,14 @@ export function useApplyCopilotCheckpointHandoff({
       setInput(prompt);
     };
 
+    // Asset checkpoints are persisted in hidden synthetic sessions. Start a
+    // normal conversation from their snapshot instead of reviving that
+    // implementation-only session in the Copilot UI.
+    if (handoff.source === "asset_auto") {
+      startFromCheckpoint();
+      return;
+    }
+
     const candidate = sessions.find(
       (session) => session.id === handoff.sessionId,
     ) ?? ({ id: handoff.sessionId } as ChatSession);

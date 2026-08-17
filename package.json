@@ -23,6 +23,8 @@
     "eval:paper-search:compare": "python3 scripts/paper-search-eval/compare_litsearch_reports.py",
     "eval:paper-search:snippets": "python3 scripts/paper-search-eval/probe_snippet_search.py",
     "eval:paper-search:inspect": "python3 scripts/paper-search-eval/inspect_gold.py",
+    "eval:core-agent": "python3 scripts/core-agent-eval/run_core_gates.py",
+    "eval:core-agent:test": "python3 -m unittest discover -s scripts/core-agent-eval -p 'test_*.py'",
     "tauri": "pnpm --dir apps/desktop run tauri",
     "deploy:all": "node scripts/release-sync-landing.mjs --deploy-all",
     "release:landing": "node scripts/release-sync-landing.mjs"

@@ -1,13 +1,23 @@
 use crate::assistant_prompts::specialist_system;
 use crate::ccf::match_venue;
 use crate::commands::arxiv::{search_recent_paper_hints, search_semantic_scholar_hints};
+use crate::commands::knowledge_hypothesis::{
+    ensure_validation as ensure_hypothesis_validation,
+    persist_versions_and_checkpoint as persist_hypothesis_versions,
+    prompt_context as hypothesis_to_prompt_context, stored_card, validate_card,
+    ResearchHypothesisCardPayload,
+};
 use crate::commands::knowledge_notes::note_row_to_json;
 use crate::commands::knowledge_plan_status::{
     mark_interest_plan_planned, mark_interest_plan_running, restore_interest_plan_status,
 };
 use crate::commands::memory::{is_long_term_memory_enabled, record_knowledge_note_created_event};
 use crate::links::paper_search_url;
-use crate::llm::{resolve_model, resolve_temperature, LlmClient, LlmImage, LlmMessage};
+use crate::llm::{resolve_model, resolve_temperature, LlmClient, LlmMessage};
+use crate::services::memory_checkpoint_service::{
+    record_research_asset_checkpoint, research_interest_asset_snapshot,
+    ResearchAssetCheckpointInput,
+};
 use crate::state::AppState;
 use chrono;
 use serde::{Deserialize, Serialize};
@@ -48,12 +58,11 @@ pub async fn knowledge_list_interests(
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let rows = sqlx::query(
-        "SELECT id, topic, folder_name, parent_id, keywords, profile, learning_path, status, created_at FROM research_interests ORDER BY created_at DESC",
+        "SELECT id, topic, folder_name, parent_id, keywords, profile, hypothesis_card, learning_path, status, created_at FROM research_interests ORDER BY created_at DESC",
     )
     .fetch_all(&state.db)
     .await
     .map_err(|e| e.to_string())?;
-
     let list: Vec<serde_json::Value> = rows.iter().map(research_interest_row_to_json).collect();
     Ok(json!(list))
 }
@@ -64,6 +73,7 @@ pub async fn knowledge_create_interest(
     topic: String,
     keywords: Vec<String>,
     profile: Option<ResearchInterestProfilePayload>,
+    hypothesis_card: Option<ResearchHypothesisCardPayload>,
 ) -> Result<serde_json::Value, String> {
     let trimmed_topic = topic.trim();
     if trimmed_topic.is_empty() {
@@ -76,19 +86,42 @@ pub async fn knowledge_create_interest(
     let profile_json = profile
         .as_ref()
         .and_then(|value| serde_json::to_string(value).ok());
+    if let Some(card) = hypothesis_card.as_ref() {
+        validate_card(card)?;
+    }
+    let stored_hypothesis_card = hypothesis_card.as_ref().map(stored_card);
+    let hypothesis_card_json = stored_hypothesis_card
+        .as_ref()
+        .and_then(|value| serde_json::to_string(value).ok());
     let folder_name = default_interest_folder_name(trimmed_topic);
     sqlx::query(
-        "INSERT INTO research_interests (id, topic, folder_name, keywords, profile, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO research_interests (id, topic, folder_name, keywords, profile, hypothesis_card, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(trimmed_topic)
     .bind(&folder_name)
     .bind(&kw_json)
     .bind(&profile_json)
+    .bind(&hypothesis_card_json)
     .bind(&now)
     .execute(&state.db)
     .await
     .map_err(|e| e.to_string())?;
+    if let Some(card) = hypothesis_card.as_ref() {
+        let profile_value = profile
+            .as_ref()
+            .and_then(|value| serde_json::to_value(value).ok());
+        persist_hypothesis_versions(
+            &state.db,
+            &id,
+            trimmed_topic,
+            &keywords,
+            profile_value.as_ref(),
+            card,
+            &now,
+        )
+        .await?;
+    }
     Ok(json!({
         "id": id,
         "topic": trimmed_topic,
@@ -96,6 +129,7 @@ pub async fn knowledge_create_interest(
         "parent_id": null,
         "keywords": keywords,
         "profile": profile,
+        "hypothesis_card": stored_hypothesis_card,
         "status": "active",
         "created_at": now
     }))
@@ -120,7 +154,7 @@ pub async fn knowledge_update_interest_folder(
         .map_err(|e| e.to_string())?;
 
     let row = sqlx::query(
-        "SELECT id, topic, folder_name, parent_id, keywords, profile, learning_path, status, created_at FROM research_interests WHERE id = ?",
+        "SELECT id, topic, folder_name, parent_id, keywords, profile, hypothesis_card, learning_path, status, created_at FROM research_interests WHERE id = ?",
     )
     .bind(&id)
     .fetch_optional(&state.db)
@@ -316,7 +350,7 @@ pub async fn knowledge_create_folder(
     .map_err(|e| e.to_string())?;
 
     let row = sqlx::query(
-        "SELECT id, topic, folder_name, parent_id, keywords, profile, learning_path, status, created_at FROM research_interests WHERE id = ?",
+        "SELECT id, topic, folder_name, parent_id, keywords, profile, hypothesis_card, learning_path, status, created_at FROM research_interests WHERE id = ?",
     )
     .bind(&id)
     .fetch_optional(&state.db)
@@ -370,7 +404,7 @@ pub async fn knowledge_move_interest(
     }
 
     let row = sqlx::query(
-        "SELECT id, topic, folder_name, parent_id, keywords, profile, learning_path, status, created_at FROM research_interests WHERE id = ?",
+        "SELECT id, topic, folder_name, parent_id, keywords, profile, hypothesis_card, learning_path, status, created_at FROM research_interests WHERE id = ?",
     )
     .bind(&id)
     .fetch_optional(&state.db)
@@ -475,7 +509,7 @@ pub async fn knowledge_generate_plan(
     start_step: Option<usize>,
 ) -> Result<(), String> {
     let row = sqlx::query(
-        "SELECT topic, keywords, profile, partial_plan FROM research_interests WHERE id = ?",
+        "SELECT topic, keywords, profile, hypothesis_card, partial_plan FROM research_interests WHERE id = ?",
     )
     .bind(&id)
     .fetch_optional(&state.db)
@@ -488,12 +522,15 @@ pub async fn knowledge_generate_plan(
         .get::<Option<String>, _>("keywords")
         .unwrap_or_else(|| "[]".into());
     let profile_str: Option<String> = row.get::<Option<String>, _>("profile");
+    let hypothesis_card_str: Option<String> = row.get::<Option<String>, _>("hypothesis_card");
     let partial_plan_str: Option<String> = row.get::<Option<String>, _>("partial_plan");
 
     let keywords: Vec<String> = serde_json::from_str(&kw_str).unwrap_or_default();
     let profile = profile_str
         .and_then(|value| serde_json::from_str::<ResearchInterestProfilePayload>(&value).ok())
         .unwrap_or_default();
+    let hypothesis_card = hypothesis_card_str
+        .and_then(|value| serde_json::from_str::<ResearchHypothesisCardPayload>(&value).ok());
     let mut partial_context: PartialPlanContext = partial_plan_str
         .and_then(|value| serde_json::from_str(&value).ok())
         .unwrap_or_default();
@@ -544,7 +581,8 @@ pub async fn knowledge_generate_plan(
             let analyst_prompt = PLANNER_ANALYST_PROMPT
                 .replace("{topic}", &topic)
                 .replace("{keywords}", &keywords.join("、"))
-                + &profile_to_analysis_context(&profile);
+                + &profile_to_analysis_context(&profile)
+                + &hypothesis_to_prompt_context(hypothesis_card.as_ref());
             let analyst_msgs = vec![
                 LlmMessage::system(planner_analyst_system()),
                 LlmMessage::user(&analyst_prompt),
@@ -833,9 +871,13 @@ pub async fn knowledge_generate_plan(
                     .join("、")
             })
             .unwrap_or_default();
-        let profile_context = profile_to_prompt_context(&profile);
+        let profile_context = format!(
+            "{}{}",
+            profile_to_prompt_context(&profile),
+            hypothesis_to_prompt_context(hypothesis_card.as_ref())
+        );
         let prompt = format!(
-            "{}\n{}\n\n补充约束：\n- 方向范围：{}\n- 优先覆盖主题：{}\n- classic_papers 至少输出 {} 篇，优先近三年论文，不足时再补经典论文。\n- 候选论文池：{}",
+            "{}\n{}\n\n补充约束：\n- 方向范围：{}\n- 优先覆盖主题：{}\n- classic_papers 至少输出 {} 篇，优先近三年论文，不足时再补经典论文。\n- 候选论文池：{}{}",
             PLANNER_PROMPT
                 .replace("{topic}", &topic)
                 .replace("{keywords}", &keywords.join(", ")),
@@ -851,6 +893,11 @@ pub async fn knowledge_generate_plan(
                     .map(format_paper_hint_for_prompt)
                     .collect::<Vec<_>>()
                     .join("；")
+            },
+            if hypothesis_card.is_some() {
+                "\n- 额外输出 hypothesis_validation：包含 hypothesis、tasks、control_plan、decision_metrics、stop_conditions、evidence_boundary。tasks 必须覆盖候选卡验证步骤；指标和停止条件必须可检查。"
+            } else {
+                ""
             }
         );
         let designer_model = resolve_model(&settings, &["planner_generation_model"]);
@@ -866,10 +913,11 @@ pub async fn knowledge_generate_plan(
         {
             Ok(resp) => {
                 let clean = crate::commands::papers::extract_json_pub(&resp);
-                let v: serde_json::Value = enrich_learning_path_json(
+                let mut v: serde_json::Value = enrich_learning_path_json(
                     serde_json::from_str(&clean).unwrap_or_default(),
                     &paper_hints,
                 );
+                ensure_hypothesis_validation(&mut v, hypothesis_card.as_ref());
                 let path_str = serde_json::to_string(&v).unwrap_or_default();
                 if let Err(e) = mark_interest_plan_planned(&db, &rid, &path_str).await {
                     let error = e.to_string();
@@ -894,17 +942,53 @@ pub async fn knowledge_generate_plan(
                     let _ = app.emit("interest:error", json!({ "id": &rid, "error": &error }));
                     return;
                 }
+                let stage_count = v
+                    .get("learning_stages")
+                    .and_then(|x| x.as_array())
+                    .map(|arr| arr.len())
+                    .unwrap_or(0);
+                let profile_value = serde_json::to_value(&profile).unwrap_or_else(|_| json!({}));
+                let hypothesis_value = hypothesis_card
+                    .as_ref()
+                    .and_then(|card| serde_json::to_value(card).ok());
+                let next_steps = hypothesis_card
+                    .as_ref()
+                    .map(|card| card.validation_steps.clone())
+                    .unwrap_or_else(|| vec!["从学习路线第一阶段开始执行并记录结果。".to_string()]);
+                let open_questions = hypothesis_card
+                    .as_ref()
+                    .map(|card| card.uncertainties.clone())
+                    .unwrap_or_default();
+                let _ = record_research_asset_checkpoint(
+                    &db,
+                    ResearchAssetCheckpointInput {
+                        context_type: "interest",
+                        context_id: &rid,
+                        action: "interest.plan_completed",
+                        goal: hypothesis_card
+                            .as_ref()
+                            .map(|card| card.hypothesis.as_str())
+                            .unwrap_or(&topic),
+                        summary: &format!("研究规划已生成，共 {stage_count} 个阶段。"),
+                        completed_items: vec![format!("生成包含 {stage_count} 个阶段的研究规划。")],
+                        open_questions,
+                        next_steps,
+                        asset_snapshot: research_interest_asset_snapshot(
+                            &topic,
+                            &keywords,
+                            Some(&profile_value),
+                            hypothesis_value.as_ref(),
+                            Some(&v),
+                        ),
+                    },
+                )
+                .await;
                 // Clear partial plan on success
                 let _ =
                     sqlx::query("UPDATE research_interests SET partial_plan = NULL WHERE id = ?")
                         .bind(&rid)
                         .execute(&db)
                         .await;
-                let stage_count = v
-                    .get("learning_stages")
-                    .and_then(|x| x.as_array())
-                    .map(|arr| arr.len())
-                    .unwrap_or(0);
                 let _ = app.emit(
                     "interest:agent_complete",
                     json!({
@@ -1132,166 +1216,6 @@ pub async fn knowledge_suggest_topics(
             })
             .unwrap_or_default();
         Ok::<_, String>(topics)
-    }
-    .await;
-
-    match outcome {
-        Ok(v) => {
-            let _ = app.emit(
-                "interest:agent_complete",
-                json!({ "id": "suggest", "agent": { "id": suggest_id } }),
-            );
-            Ok(v)
-        }
-        Err(e) => {
-            let _ = app.emit("interest:error", json!({ "id": "suggest", "error": &e }));
-            Err(e)
-        }
-    }
-}
-
-const IDEA_FROM_MATERIALS_PROMPT: &str = r#"你是一位资深研究导师。学生还没想好做什么，他提供了一些零散材料（可能是与导师讨论 idea 的记录/录音转写、会议笔记、灵感碎片、相关截图或图片等）。请基于这些材料，帮他提炼具体、可执行的研究 idea，并补充相关背景信息。
-
-要求：
-- 给出 4~6 个 idea，每个都必须具体可执行，不能是宽泛领域；体现近两年学术前沿或落地价值
-- title：一句话 idea（10~30 字，中文）
-- rationale：从材料里抓到的线索、为什么值得做（1~2 句）
-- background：相关背景信息——已有相关工作、关键概念、可能的数据/方法切入点（2~3 句）
-- keywords：3~5 个可用于文献检索的关键词
-- 紧扣材料内容，优先顺着材料里出现的线索发散，不要脱离材料凭空发挥；材料信息不足时也要给出最贴近的方向并说明依据
-
-仅返回合法 JSON 对象：
-{"ideas": [{"title": "...", "rationale": "...", "background": "...", "keywords": ["...", "..."]}]}
-
-学生提供的材料：
-{materials}"#;
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ResearchIdeaSuggestion {
-    pub title: String,
-    pub rationale: String,
-    pub background: String,
-    pub keywords: Vec<String>,
-}
-
-/// 「没想好做什么」场景：学生给一些零散材料（文字/文档文本 + 可选图片），
-/// 小妍据此提炼可执行的研究 idea 与相关背景。含图片时走视觉模型。
-#[tauri::command]
-pub async fn knowledge_ideas_from_materials(
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
-    materials: String,
-    images: Option<Vec<crate::commands::chat::ImageInput>>,
-) -> Result<Vec<ResearchIdeaSuggestion>, String> {
-    let images: Vec<LlmImage> = images
-        .unwrap_or_default()
-        .into_iter()
-        .map(|img| LlmImage {
-            media_type: img.media_type,
-            data: img.data,
-        })
-        .collect();
-
-    if materials.trim().is_empty() && images.is_empty() {
-        return Err("请先添加一些材料（文字、文档或图片）。".to_string());
-    }
-
-    let suggest_id = Uuid::new_v4().to_string();
-    let _ = app.emit(
-        "interest:agent_start",
-        json!({
-            "id": "suggest",
-            "agent": {
-                "id": suggest_id,
-                "name": "灵感提炼",
-                "role": "从材料中提炼研究 idea",
-                "status": "running"
-            }
-        }),
-    );
-
-    let outcome = async {
-        let settings = state.settings.read().await.clone();
-        let temperature = resolve_temperature(&settings, "planner_hint_temperature", 0.7);
-        // 含图片时改用专用视觉模型；未配置则提示去设置，避免把图发给不支持视觉的主模型。
-        let (client, model) = if images.is_empty() {
-            (
-                LlmClient::from_settings(&settings).map_err(|e| e.to_string())?,
-                resolve_model(&settings, &["planner_hint_model"]),
-            )
-        } else {
-            LlmClient::vision_client_from_settings(&settings).ok_or_else(|| {
-                "材料中包含图片，请先在「设置 → 模型角色 → 视界·视觉」中配置视觉模型。".to_string()
-            })?
-        };
-
-        let material_text = if materials.trim().is_empty() {
-            "（无文字材料，仅提供了图片，请基于图片内容分析）".to_string()
-        } else {
-            materials.trim().to_string()
-        };
-        let prompt = IDEA_FROM_MATERIALS_PROMPT.replace("{materials}", &material_text);
-
-        let user_msg = if images.is_empty() {
-            LlmMessage::user(&prompt)
-        } else {
-            LlmMessage::user_with_images(&prompt, images.clone())
-        };
-        let messages = vec![
-            LlmMessage::system(
-                "你是一位资深学术导师，擅长从零散材料中识别有价值、可执行的研究切入点。",
-            ),
-            user_msg,
-        ];
-        let response = client
-            .chat(&messages, model.as_deref(), temperature)
-            .await
-            .map_err(|e| e.to_string())?;
-        let clean = crate::commands::papers::extract_json_pub(&response);
-        let ideas: Vec<ResearchIdeaSuggestion> = serde_json::from_str::<serde_json::Value>(&clean)
-            .ok()
-            .and_then(|v| {
-                v.get("ideas").and_then(|arr| arr.as_array()).map(|arr| {
-                    arr.iter()
-                        .filter_map(|item| {
-                            let title = item
-                                .get("title")
-                                .and_then(|n| n.as_str())
-                                .map(|s| s.trim().to_string())
-                                .filter(|s| !s.is_empty())?;
-                            let str_field = |key: &str| {
-                                item.get(key)
-                                    .and_then(|n| n.as_str())
-                                    .unwrap_or("")
-                                    .trim()
-                                    .to_string()
-                            };
-                            let keywords = item
-                                .get("keywords")
-                                .and_then(|k| k.as_array())
-                                .map(|ks| {
-                                    ks.iter()
-                                        .filter_map(|k| k.as_str().map(|s| s.trim().to_string()))
-                                        .filter(|s| !s.is_empty())
-                                        .collect::<Vec<_>>()
-                                })
-                                .unwrap_or_default();
-                            Some(ResearchIdeaSuggestion {
-                                title,
-                                rationale: str_field("rationale"),
-                                background: str_field("background"),
-                                keywords,
-                            })
-                        })
-                        .collect()
-                })
-            })
-            .unwrap_or_default();
-
-        if ideas.is_empty() {
-            return Err("没能从材料里提炼出可用的 idea，请补充更多信息后重试。".to_string());
-        }
-        Ok::<_, String>(ideas)
     }
     .await;
 
@@ -1544,6 +1468,7 @@ fn research_interest_row_to_json(r: &sqlx::sqlite::SqliteRow) -> serde_json::Val
         .get::<Option<String>, _>("keywords")
         .unwrap_or_else(|| "[]".into());
     let profile_str: Option<String> = r.get::<Option<String>, _>("profile");
+    let hypothesis_card_str: Option<String> = r.get::<Option<String>, _>("hypothesis_card");
     let learning_path = r
         .get::<Option<String>, _>("learning_path")
         .and_then(|value| serde_json::from_str::<serde_json::Value>(&value).ok())
@@ -1556,6 +1481,7 @@ fn research_interest_row_to_json(r: &sqlx::sqlite::SqliteRow) -> serde_json::Val
         "parent_id": r.get::<Option<String>, _>("parent_id"),
         "keywords": serde_json::from_str::<serde_json::Value>(&keywords).unwrap_or(json!([])),
         "profile": profile_str.and_then(|value| serde_json::from_str::<serde_json::Value>(&value).ok()),
+        "hypothesis_card": hypothesis_card_str.and_then(|value| serde_json::from_str::<serde_json::Value>(&value).ok()),
         "learning_path": learning_path,
         "status": r.get::<String, _>("status"),
         "created_at": r.get::<String, _>("created_at"),

@@ -11,6 +11,8 @@ import PlannerComposer from "./PlannerComposer";
 import ResearchWorkbench from "./ResearchWorkbench";
 import TopicDiscoveryWizard from "./TopicDiscoveryWizard";
 import IdeaFromMaterialsPanel from "./IdeaFromMaterialsPanel";
+import type { HypothesisPlanningDraft } from "./hypothesisPlanning";
+import HypothesisValidationPlan from "./HypothesisValidationPlan";
 import {
   applyInterestPlanSnapshots,
   failInterestPlanRun,
@@ -161,6 +163,8 @@ export function LearningPathView({ path }: { path: LearningPath }) {
         </div>
       )}
 
+      {path.hypothesis_validation ? <HypothesisValidationPlan plan={path.hypothesis_validation} /> : null}
+
       {(path.tools_and_frameworks?.length || path.communities?.length) ? (
         <div className="grid gap-3 md:grid-cols-2">
           {path.tools_and_frameworks && path.tools_and_frameworks.length > 0 && (
@@ -221,6 +225,7 @@ export default function InterestsPanel() {
   const [discovering, setDiscovering] = useState(false);
   const [discoverMode, setDiscoverMode] = useState<"questions" | "materials">("questions");
   const [wizardTopic, setWizardTopic] = useState("");
+  const [hypothesisDraft, setHypothesisDraft] = useState<HypothesisPlanningDraft | null>(null);
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
   const [folderDraft, setFolderDraft] = useState("");
   const [savingFolderId, setSavingFolderId] = useState<string | null>(null);
@@ -406,8 +411,9 @@ export default function InterestsPanel() {
               />
             ) : (
               <IdeaFromMaterialsPanel
-                onSelect={(topic) => {
-                  setWizardTopic(topic);
+                onSelect={(draft) => {
+                  setWizardTopic(draft.topic);
+                  setHypothesisDraft(draft);
                   setDiscovering(false);
                   setCreating(true);
                 }}
@@ -420,11 +426,13 @@ export default function InterestsPanel() {
         {creating && (
           <PlannerComposer
             initialTopic={wizardTopic}
-            onCancel={() => { setCreating(false); setWizardTopic(""); }}
+            initialDraft={hypothesisDraft ?? undefined}
+            onCancel={() => { setCreating(false); setWizardTopic(""); setHypothesisDraft(null); }}
             onCreated={(nextInterest, meta) => {
               setInterests((prev) => [nextInterest, ...prev]);
               setCreating(false);
               setWizardTopic("");
+              setHypothesisDraft(null);
               if (meta?.failedUploads.length) {
                 const uploadedSummary = meta.uploadedReferences > 0 ? `已导入 ${meta.uploadedReferences} 篇，` : "";
                 setError(`研究主题已创建，${uploadedSummary}${meta.failedUploads.length} 篇参考文献导入失败：${meta.failedUploads.join("；")}`);

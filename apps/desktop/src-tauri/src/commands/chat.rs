@@ -11,10 +11,12 @@ use crate::services::agent_runtime_service::{
 use crate::services::chat_context_service::{
     build_chat_context_summary, collect_chat_sources, embed_query,
 };
+use crate::services::chat_request_policy::ChatRequestPolicy;
 use crate::services::memory_checkpoint_service::{
     record_chat_checkpoint, record_chat_failure_checkpoint, ChatCheckpointInput,
     ChatFailureCheckpointInput,
 };
+use crate::services::paper_fact_service::load_paper_fact_source;
 use crate::state::AppState;
 use crate::web_search::web_search;
 use serde_json::json;
@@ -64,7 +66,7 @@ const MAX_CHAT_IMAGE_BYTES: usize = 16 * 1024 * 1024;
 #[tauri::command]
 pub async fn chat_list_sessions(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     let rows = sqlx::query(
-        "SELECT id, title, context_type, context_id, tag, created_at, updated_at FROM chat_sessions WHERE tag = '0' ORDER BY updated_at DESC",
+        "SELECT id, title, context_type, context_id, tag, created_at, updated_at FROM chat_sessions WHERE tag = '0' AND context_type != 'asset_checkpoint' ORDER BY updated_at DESC",
     )
     .fetch_all(&state.db)
     .await
@@ -504,8 +506,11 @@ pub async fn chat_stream(
     sqlx::query("INSERT INTO chat_messages (id, session_id, role, content, images, created_at) VALUES (?, ?, 'user', ?, ?, ?)")
         .bind(&msg_id).bind(&sid).bind(&message).bind(&images_json).bind(&now)
         .execute(&state.db).await.map_err(|e| e.to_string())?;
-    let settings = state.settings.read().await.clone();
-    let long_term_memory_enabled = is_long_term_memory_enabled(&settings);
+    let mut settings = state.settings.read().await.clone();
+    let request_policy = ChatRequestPolicy::from_message(&message);
+    request_policy.apply_to_settings(&mut settings);
+    let long_term_memory_enabled =
+        request_policy.allows_long_term_memory(is_long_term_memory_enabled(&settings));
     if long_term_memory_enabled {
         let _ = crate::commands::memory::record_chat_prompt_event(
             &state.db,
@@ -542,6 +547,7 @@ pub async fn chat_stream(
             chat_mode.as_deref().unwrap_or("task"),
             history,
             images,
+            request_policy,
         )
         .await;
 
@@ -618,15 +624,50 @@ async fn run_chat(
     chat_mode: &str,
     history: Vec<LlmMessage>,
     images: Vec<LlmImage>,
+    request_policy: ChatRequestPolicy,
 ) -> anyhow::Result<()> {
-    let client = LlmClient::from_settings(settings)?;
     let multi_agent = settings
         .get("multi_agent_enabled")
         .map(|v| v == "true")
         .unwrap_or(true);
-    let long_term_memory_enabled = is_long_term_memory_enabled(settings);
+    let long_term_memory_enabled =
+        request_policy.allows_long_term_memory(is_long_term_memory_enabled(settings));
+    let paper_fact_source = if context_type == "paper" {
+        match context_id.as_deref() {
+            Some(paper_id) => load_paper_fact_source(db, paper_id, message).await,
+            None => None,
+        }
+    } else {
+        None
+    };
+    let history_has_image = history.iter().any(|m| !m.images.is_empty());
+    let use_direct_chat = chat_mode == "direct" || !images.is_empty() || history_has_image;
+    let paper_fact_agent_enabled = settings
+        .get("multi_agent_enabled_agents")
+        .map(String::as_str)
+        .unwrap_or("retrieval,planner,literature_scout,survey,paper_analyst,reproduction,synthesis")
+        .split(',')
+        .any(|agent| agent.trim() == "paper_analyst");
+    let deterministic_paper_fact =
+        multi_agent && !use_direct_chat && paper_fact_agent_enabled && paper_fact_source.is_some();
+    let client = if deterministic_paper_fact {
+        // 确定性论文事实路径不调用模型；使用惰性的回环 client 只满足现有 runtime 契约，
+        // 即使用户尚未配置模型也可以回答本地参数问题。
+        LlmClient::OpenAI {
+            base_url: "http://127.0.0.1:9/v1".to_string(),
+            api_key: String::new(),
+            chat_model: "unused-paper-fact-guard".to_string(),
+            embed_model: "unused-paper-fact-guard".to_string(),
+        }
+    } else {
+        LlmClient::from_settings(settings)?
+    };
     // 整轮对话只向量化一次 query：记忆检索与来源召回共用，避免重复 embed 调用。
-    let query_embedding = embed_query(settings, message).await;
+    let query_embedding = if request_policy.allows_embedding() && !deterministic_paper_fact {
+        embed_query(settings, message).await
+    } else {
+        None
+    };
     let context_summary = build_chat_context_summary(
         db,
         context_type,
@@ -638,7 +679,7 @@ async fn run_chat(
     .await;
 
     // 后台回填观察的 embedding，使新写入的过程记忆很快可被语义检索；不阻塞回答。
-    {
+    if request_policy.allows_network() && !deterministic_paper_fact {
         let db = db.clone();
         let settings = settings.clone();
         tauri::async_runtime::spawn(async move {
@@ -648,10 +689,10 @@ async fn run_chat(
 
     // 多模态图片仅在 run_simple（直答）路径支持；当前轮或历史含图都强制走直答，
     // 既避免多智能体路径静默丢图，也保证带图历史的多轮追问仍走视觉模型。
-    let history_has_image = history.iter().any(|m| !m.images.is_empty());
-    let use_direct_chat = chat_mode == "direct" || !images.is_empty() || history_has_image;
-
     let full = if !use_direct_chat && multi_agent {
+        if !deterministic_paper_fact {
+            request_policy.ensure_client_allowed(&client)?;
+        }
         let runtime_result = run_agent_runtime(
             AgentRuntimeKind::from_settings(settings),
             AgentRuntimeRequest {
@@ -682,11 +723,25 @@ async fn run_chat(
             &context_summary,
             &history,
             &images,
+            request_policy,
         )
         .await?
     };
 
-    let sources = collect_chat_sources(db, settings, message, query_embedding.as_deref()).await;
+    let sources = if deterministic_paper_fact {
+        vec![serde_json::to_value(
+            paper_fact_source.expect("deterministic paper fact source"),
+        )?]
+    } else {
+        collect_chat_sources(
+            db,
+            settings,
+            message,
+            query_embedding.as_deref(),
+            request_policy.allows_embedding(),
+        )
+        .await
+    };
     let sources_json = if sources.is_empty() {
         None
     } else {
@@ -763,6 +818,7 @@ async fn run_simple(
     context_summary: &str,
     history: &[LlmMessage],
     images: &[LlmImage],
+    request_policy: ChatRequestPolicy,
 ) -> anyhow::Result<String> {
     let system_prompt = main_chat_system(context_summary);
     let mut msgs = vec![LlmMessage::system(&system_prompt)];
@@ -805,6 +861,7 @@ async fn run_simple(
         Some((vision_client, vision_model)) => (vision_client, vision_model.clone()),
         None => (client, resolve_model(settings, &["copilot_simple_model"])),
     };
+    request_policy.ensure_client_allowed(client)?;
     let rid = request_id.to_string();
     let app_ref = app.clone();
 
@@ -813,7 +870,11 @@ async fn run_simple(
         .and_then(|v| v.parse().ok())
         .unwrap_or(5);
 
-    let tools = build_chat_tools(settings);
+    let tools = build_chat_tools(
+        settings,
+        request_policy.allows_external_tools(),
+        request_policy.allows_persistent_tools(),
+    );
 
     let mut tool_rounds = 0usize;
 
@@ -862,6 +923,13 @@ async fn run_simple(
 
                 for tc in &tool_calls {
                     if tc.name == "web_search" {
+                        if !request_policy.allows_external_tools() {
+                            msgs.push(LlmMessage::tool(
+                                &tc.id,
+                                "本次请求已启用离线边界，不能执行联网搜索。",
+                            ));
+                            continue;
+                        }
                         let query: String =
                             serde_json::from_str::<serde_json::Value>(&tc.arguments)
                                 .ok()
@@ -890,7 +958,17 @@ async fn run_simple(
                             }
                         }
                     } else {
-                        match dispatch_tool(&app_ref, &db, settings, tc, &rid).await {
+                        match dispatch_tool(
+                            &app_ref,
+                            &db,
+                            settings,
+                            tc,
+                            &rid,
+                            request_policy.allows_external_tools(),
+                            request_policy.allows_persistent_tools(),
+                        )
+                        .await
+                        {
                             Ok(result) => {
                                 msgs.push(LlmMessage::tool(&tc.id, &result));
                             }
