@@ -191,6 +191,64 @@ function pruneNonRuntimeFiles(directory) {
   return { removedFiles, removedBytes };
 }
 
+// Native prebuilds for other platforms bloat the bundle and break linuxdeploy
+// on Linux, which recursively calls ldd on every ELF it finds. Each CI job
+// only needs binaries matching process.platform/process.arch; delete the rest.
+function prunePlatformBinaries(directory) {
+  const current = `${process.platform}-${process.arch}`;
+  const muslNames = new Set(["musl_x64", "musl_arm64"]);
+  let removedDirs = 0;
+  let removedFiles = 0;
+
+  const isOtherPlatformPackage = (name) => {
+    // Examples: sharp-darwin-arm64, koffi-win32-x64, sharp-libvips-linuxmusl-x64
+    const match = /-(darwin|win32|linuxmusl|linux)-(arm64|x64|arm)(?:$|-)/.exec(name);
+    if (!match) return false;
+    const suffix = `${match[1]}-${match[2]}`;
+    if (suffix === current) return false;
+    return true;
+  };
+
+  const visit = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (muslNames.has(entry.name) || entry.name === "linuxmusl-x64" || entry.name === "linuxmusl-arm64") {
+          rmSync(path, { recursive: true, force: true });
+          removedDirs += 1;
+          continue;
+        }
+        if (entry.name === "prebuilds") {
+          for (const child of readdirSync(path, { withFileTypes: true })) {
+            const childPath = join(path, child.name);
+            if (!child.isDirectory()) continue;
+            // Keep current platform prebuilds, but never musl on glibc hosts.
+            if (child.name.startsWith(current) && !child.name.includes("musl")) continue;
+            rmSync(childPath, { recursive: true, force: true });
+            removedDirs += 1;
+          }
+          continue;
+        }
+        if (isOtherPlatformPackage(entry.name)) {
+          rmSync(path, { recursive: true, force: true });
+          removedDirs += 1;
+          continue;
+        }
+        visit(path);
+      } else if (entry.isFile()) {
+        if ((process.platform !== "win32" && entry.name.endsWith(".dll")) ||
+            (process.platform !== "darwin" && entry.name.endsWith(".dylib"))) {
+          rmSync(path, { force: true });
+          removedFiles += 1;
+        }
+      }
+    }
+  };
+
+  visit(directory);
+  return { removedDirs, removedFiles };
+}
+
 function workspacePackageMap(buildRoot) {
   const packages = new Map();
   const visit = (directory) => {
@@ -290,6 +348,10 @@ function buildRuntime(buildRoot, manifest, node) {
     const pruned = pruneNonRuntimeFiles(nodeModules);
     console.log(
       `pruned non-runtime files: ${pruned.removedFiles} files, ${(pruned.removedBytes / 1024 / 1024).toFixed(1)} MiB`,
+    );
+    const platformPruned = prunePlatformBinaries(nodeModules);
+    console.log(
+      `pruned platform binaries: ${platformPruned.removedDirs} dirs, ${platformPruned.removedFiles} files`,
     );
   }
 
