@@ -32,21 +32,6 @@ export const MOCK_PAPERS = [
   },
 ];
 
-export const MOCK_EXPERIMENTS = {
-  experiments: [
-    {
-      id: "exp-1",
-      title: "BERT 微调实验",
-      config: '{"lr": 2e-5, "epochs": 3, "batch_size": 16}',
-      result: "准确率: 92.5%, F1: 91.8%",
-      notes: "使用 BERT-base 模型在中文数据集上微调",
-      linkedSubmissionId: null,
-      createdAt: "2024-01-10T10:00:00Z",
-      updatedAt: "2024-01-10T10:00:00Z",
-    },
-  ],
-};
-
 export const MOCK_CHAT_SESSIONS = [
   {
     id: "session-1",
