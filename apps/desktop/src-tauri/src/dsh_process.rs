@@ -27,7 +27,7 @@ fn bundled_paths(app: &AppHandle) -> Result<BundledDshPaths, String> {
         } else {
             runtime.join("node")
         },
-        entry: runtime.join("app").join("lib").join("bin.js"),
+        entry: runtime.join("lib").join("bin.js"),
     };
     if !paths.node.is_file() || !paths.entry.is_file() {
         return Err(
