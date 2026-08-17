@@ -126,7 +126,7 @@ jobs:
 
             ### 下载说明
             - **macOS Apple Silicon** -> .dmg (aarch64)
-            - **Windows** -> .msi 或 .exe
+            - **Windows** -> .exe
             - **Linux x64** -> .AppImage / .deb / .rpm
 
             > 首次安装 macOS 版本如提示"无法验证"，请前往系统设置 -> 隐私与安全性 -> 仍要打开。`;
@@ -182,7 +182,7 @@ jobs:
             updater_target: windows-x86_64
           - label: Linux x64
             platform: ubuntu-22.04
-            args: ""
+            args: "--verbose"
             rust_target: ""
             build_target_dir: release
             updater_target: linux-x86_64

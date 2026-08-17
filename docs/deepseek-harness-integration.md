@@ -28,7 +28,8 @@ DSH_NODE_BINARY=/absolute/path/to/node pnpm dsh:prepare-runtime
 ```text
 apps/desktop/src-tauri/resources/dsh/runtime/
 ├── node                         # Windows 为 node.exe
-├── app/                         # DSH CLI 与生产依赖闭包
+├── lib/                         # DSH CLI 入口（lib/bin.js）
+├── node_modules/                # 生产依赖闭包（已剔除 .d.ts / .map 以避开 Windows MAX_PATH）
 ├── LICENSE.node
 ├── LICENSE.deepseek-harness
 ├── THIRD_PARTY_NOTICES.deepseek-harness.md
@@ -48,7 +49,7 @@ pnpm dsh:prepare-runtime:dev
 内置模式执行：
 
 ```text
-<resource>/dsh/runtime/node <resource>/dsh/runtime/app/lib/bin.js web --host 127.0.0.1 --port 0
+<resource>/dsh/runtime/node <resource>/dsh/runtime/lib/bin.js web --host 127.0.0.1 --port 0
 ```
 
 外部模式执行用户选择的 `dsh` 文件，并使用相同的 loopback 和随机端口参数。后端只接受 DSH 输出的 `http://127.0.0.1:<port>` URL，再交给页面 iframe。

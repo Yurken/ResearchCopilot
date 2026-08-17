@@ -22,7 +22,10 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sourceRoot = join(root, "vendor", "deepseek-harness");
 const resourceRoot = join(root, "apps", "desktop", "src-tauri", "resources", "dsh");
 const runtimeRoot = join(resourceRoot, "runtime");
-const appRoot = join(runtimeRoot, "app");
+// Deploy the DSH CLI directly into runtime/ (no nested app/ directory).
+// Deep node_modules paths already approach the Windows MAX_PATH limit inside
+// NSIS/WiX bundlers, so every path segment matters.
+const appRoot = runtimeRoot;
 const manifestPath = join(resourceRoot, "manifest.json");
 const args = new Set(process.argv.slice(2));
 
@@ -162,6 +165,32 @@ function materializeLinks(directory) {
   }
 }
 
+// Type declarations and sourcemaps are never loaded at runtime. Removing them
+// shrinks the bundle and keeps deeply nested dependency paths (for example
+// @mistralai/mistralai's generated operation modules) clear of the Windows
+// MAX_PATH limit that breaks makensis during NSIS bundling.
+function pruneNonRuntimeFiles(directory) {
+  let removedFiles = 0;
+  let removedBytes = 0;
+  const visit = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        visit(path);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (entry.name.endsWith(".map") || /\.d\.[cm]?ts$/.test(entry.name)) {
+        removedBytes += statSync(path).size;
+        rmSync(path, { force: true });
+        removedFiles += 1;
+      }
+    }
+  };
+  visit(directory);
+  return { removedFiles, removedBytes };
+}
+
 function workspacePackageMap(buildRoot) {
   const packages = new Map();
   const visit = (directory) => {
@@ -256,6 +285,13 @@ function buildRuntime(buildRoot, manifest, node) {
   const nodeModules = join(appRoot, "node_modules");
   if (existsSync(nodeModules)) materializeLinks(nodeModules);
   materializeWorkspaceClosure(buildRoot, appRoot);
+
+  if (existsSync(nodeModules)) {
+    const pruned = pruneNonRuntimeFiles(nodeModules);
+    console.log(
+      `pruned non-runtime files: ${pruned.removedFiles} files, ${(pruned.removedBytes / 1024 / 1024).toFixed(1)} MiB`,
+    );
+  }
 
   const entry = join(appRoot, "lib", "bin.js");
   if (!existsSync(entry)) fail(`deployed CLI entry is missing: ${entry}`);

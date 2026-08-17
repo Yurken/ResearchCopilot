@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "小妍",
+  "productName": "xiaoyan",
   "identifier": "com.researchcopilot.desktop",
   "version": "0.5.3",
   "mainBinaryName": "xiaoyan",
