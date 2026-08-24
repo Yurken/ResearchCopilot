@@ -33,7 +33,7 @@
     "pdfjs-dist": "^5.6.205",
     "pptxgenjs": "^4.0.1",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0",
+    "react-dom": "^19.2.8",
     "react-router-dom": "^7.6.2",
     "tailwind-merge": "^2.6.0"
   },
@@ -46,7 +46,7 @@
     "@testing-library/user-event": "^14.6.1",
     "@types/node": "^22",
     "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
+    "@types/react-dom": "^19.2.4",
     "@typescript-eslint/parser": "^8.65.0",
     "@vitejs/plugin-react": "^4.0.0",
     "autoprefixer": "^10.5.4",
