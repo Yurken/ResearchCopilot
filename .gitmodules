@@ -1,3 +1,19 @@
 [submodule "vendor/deepseek-harness"]
 	path = vendor/deepseek-harness
 	url = https://github.com/deepseek-ai/deepseek-harness.git
+[submodule "vendor/codex-harness"]
+	path = vendor/codex-harness
+	url = https://github.com/openai/codex.git
+	shallow = true
+[submodule "vendor/opencode-harness"]
+	path = vendor/opencode-harness
+	url = https://github.com/anomalyco/opencode.git
+	shallow = true
+[submodule "vendor/pi-web"]
+	path = vendor/pi-web
+	url = https://github.com/agegr/pi-web.git
+	shallow = true
+[submodule "vendor/pi-harness"]
+	path = vendor/pi-harness
+	url = https://github.com/earendil-works/pi.git
+	shallow = true

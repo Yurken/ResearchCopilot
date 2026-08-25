@@ -1,7 +1,7 @@
 export const CODE_HARNESS_PROVIDER_STORAGE_KEY = "rc:code-harness-provider";
 export const CODE_HARNESS_PROVIDER_CHANGE_EVENT = "rc:code-harness-provider-change";
 
-export const CODE_HARNESS_PROVIDERS = ["dsh", "codex", "opencode"] as const;
+export const CODE_HARNESS_PROVIDERS = ["dsh", "codex", "opencode", "pi"] as const;
 
 export type CodeHarnessProvider = (typeof CODE_HARNESS_PROVIDERS)[number];
 
@@ -11,12 +11,14 @@ export const CODE_HARNESS_PATHS: Record<CodeHarnessProvider, string> = {
   dsh: "/code",
   codex: "/codex",
   opencode: "/opencode",
+  pi: "/pi",
 };
 
 export const CODE_HARNESS_LABELS: Record<CodeHarnessProvider, string> = {
   dsh: "DSH",
   codex: "Codex",
   opencode: "OpenCode",
+  pi: "Pi Web",
 };
 
 export function isCodeHarnessProvider(value: unknown): value is CodeHarnessProvider {

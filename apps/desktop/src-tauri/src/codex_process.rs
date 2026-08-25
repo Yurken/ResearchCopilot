@@ -359,12 +359,18 @@ mod tests {
         assert!(candidates
             .iter()
             .any(|path| path.to_string_lossy().contains("vendor")));
-        assert!(candidates
-            .iter()
-            .any(|path| path.to_string_lossy().contains("@openai/codex")));
-        assert!(candidates
-            .iter()
-            .any(|path| path.to_string_lossy().contains("node_modules/@openai")));
+        assert!(candidates.iter().any(|path| {
+            let components: Vec<_> = path.components().collect();
+            components
+                .windows(2)
+                .any(|pair| pair[0].as_os_str() == "@openai" && pair[1].as_os_str() == "codex")
+        }));
+        assert!(candidates.iter().any(|path| {
+            let components: Vec<_> = path.components().collect();
+            components.windows(2).any(|pair| {
+                pair[0].as_os_str() == "node_modules" && pair[1].as_os_str() == "@openai"
+            })
+        }));
     }
 
     #[test]

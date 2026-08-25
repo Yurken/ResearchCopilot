@@ -29,6 +29,8 @@
     "dsh:verify-pin": "node scripts/prepare-dsh-runtime.mjs --verify-only",
     "dsh:prepare-runtime": "node scripts/prepare-dsh-runtime.mjs",
     "dsh:prepare-runtime:dev": "node scripts/prepare-dsh-runtime.mjs --use-current-node",
+    "harness:sources:init": "git submodule update --init --recursive vendor/deepseek-harness vendor/codex-harness vendor/opencode-harness vendor/pi-harness vendor/pi-web",
+    "harness:sources:update": "git submodule update --remote --checkout vendor/deepseek-harness vendor/codex-harness vendor/opencode-harness vendor/pi-harness vendor/pi-web",
     "tauri": "pnpm --dir apps/desktop run tauri",
     "deploy:all": "node scripts/release-sync-landing.mjs --deploy-all",
     "release:landing": "node scripts/release-sync-landing.mjs"

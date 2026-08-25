@@ -18,6 +18,7 @@ import { CODE_HARNESS_LABELS, CODE_HARNESS_PATHS, type CodeHarnessProvider } fro
 import CodexIcon from "./features/codex/CodexIcon";
 import DeepSeekIcon from "./features/deepseek-harness/DeepSeekIcon";
 import OpenCodeIcon from "./features/opencode/OpenCodeIcon";
+import PiWebIcon from "./features/pi-web/PiWebIcon";
 
 const Home = lazy(() => import("./pages/Home"));
 const Planner = lazy(() => import("./pages/Planner"));
@@ -33,6 +34,7 @@ const Submission = lazy(() => import("./pages/Submission"));
 const Code = lazy(() => import("./pages/Code"));
 const Codex = lazy(() => import("./pages/Codex"));
 const OpenCode = lazy(() => import("./pages/OpenCode"));
+const PiWeb = lazy(() => import("./pages/PiWeb"));
 const Writing = lazy(() => import("./pages/Writing"));
 const ResearchTheme = lazy(() => import("./pages/ResearchTheme"));
 const FocusApp = lazy(() => import("./pages/FocusLayout"));
@@ -59,7 +61,7 @@ import { SETTINGS_ACTIVE_SECTION_STORAGE_KEY } from "./features/settings/pageCon
 import { writePersistentValue } from "./hooks/usePersistentStringState";
 
 function buildNavItems(provider: CodeHarnessProvider) {
-  const icons = { dsh: DeepSeekIcon, codex: CodexIcon, opencode: OpenCodeIcon };
+  const icons = { dsh: DeepSeekIcon, codex: CodexIcon, opencode: OpenCodeIcon, pi: PiWebIcon };
   const codeItem = { to: CODE_HARNESS_PATHS[provider], icon: icons[provider], label: CODE_HARNESS_LABELS[provider] };
 
   return [
@@ -225,6 +227,7 @@ export default function App() {
             <Route path="/code" element={<RouteErrorBoundary><Code /></RouteErrorBoundary>} />
             <Route path="/codex" element={<RouteErrorBoundary><Codex /></RouteErrorBoundary>} />
             <Route path="/opencode" element={<RouteErrorBoundary><OpenCode /></RouteErrorBoundary>} />
+            <Route path="/pi" element={<RouteErrorBoundary><PiWeb /></RouteErrorBoundary>} />
             <Route path="/chat" element={<RouteErrorBoundary><Copilot /></RouteErrorBoundary>} />
             <Route path="/xiaoyan" element={<Navigate to="/chat" replace />} />
             <Route path="/copilot" element={<Navigate to="/chat" replace />} />

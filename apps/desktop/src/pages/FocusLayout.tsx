@@ -12,6 +12,7 @@ import { CODE_HARNESS_PATHS } from "../features/code-harness/shared";
 import Code from "./Code";
 import Codex from "./Codex";
 import OpenCode from "./OpenCode";
+import PiWeb from "./PiWeb";
 
 function FocusLegacyRouteRedirect({ tab }: { tab: LegacyFreeTab }) {
   const normalized = tab === "copilot" || tab === "xiaoyan" ? "chat" : tab;
@@ -42,6 +43,7 @@ export default function FocusApp() {
           <Route path="/code" element={<Code />} />
           <Route path="/codex" element={<Codex />} />
           <Route path="/opencode" element={<OpenCode />} />
+          <Route path="/pi" element={<PiWeb />} />
           <Route path="/submission" element={<FocusLegacyRouteRedirect tab="submission" />} />
           <Route path="/notes/:id" element={<NoteReader />} />
           <Route path="/settings" element={<FocusSettingsWrapper />} />

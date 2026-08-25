@@ -4,6 +4,7 @@ import { useCodeHarnessProvider } from "./useCodeHarnessProvider";
 import CodexIcon from "../codex/CodexIcon";
 import DeepSeekIcon from "../deepseek-harness/DeepSeekIcon";
 import OpenCodeIcon from "../opencode/OpenCodeIcon";
+import PiWebIcon from "../pi-web/PiWebIcon";
 
 const OPTIONS: Array<{
   id: CodeHarnessProvider;
@@ -29,6 +30,12 @@ const OPTIONS: Array<{
     description: "托管 OpenCode 官方 Web 页面和本地运行时。",
     icon: OpenCodeIcon,
   },
+  {
+    id: "pi",
+    title: "Pi Web",
+    description: "嵌入 Pi 的完整 Web 工作台、会话与技能管理。",
+    icon: PiWebIcon,
+  },
 ];
 
 export default function CodeHarnessSettingsPanel() {
@@ -48,7 +55,7 @@ export default function CodeHarnessSettingsPanel() {
   return (
     <div>
       <p className="mb-2 ml-1 text-xs font-medium text-ink-tertiary">代码助手</p>
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {OPTIONS.map((option) => {
           const selected = provider === option.id;
           const Icon = option.icon;

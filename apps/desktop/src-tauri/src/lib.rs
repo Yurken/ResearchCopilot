@@ -30,6 +30,8 @@ mod links;
 mod llm;
 mod opencode;
 mod opencode_process;
+mod pi_web;
+mod pi_web_process;
 mod rag;
 mod repositories;
 mod semantic_scholar;
@@ -341,6 +343,7 @@ pub fn run() {
             app.manage(dsh::DshRuntimeState::new(app_data_dir.clone()));
             app.manage(codex::CodexRuntimeState::new(app_data_dir.clone()));
             app.manage(opencode::OpenCodeRuntimeState::new(app_data_dir.clone()));
+            app.manage(pi_web::PiWebRuntimeState::new(app_data_dir.clone()));
 
             configure_diagnostic_log_path(&app_data_dir);
             append_diagnostic_log(&format!(
@@ -541,6 +544,12 @@ pub fn run() {
             opencode::opencode_runtime_start,
             opencode::opencode_runtime_stop,
             opencode::opencode_runtime_validate_external,
+            // Pi Web runtime
+            pi_web::pi_web_runtime_status,
+            pi_web::pi_web_runtime_configure,
+            pi_web::pi_web_runtime_start,
+            pi_web::pi_web_runtime_stop,
+            pi_web::pi_web_runtime_validate_external,
             // Papers
             papers_list,
             papers_get,
