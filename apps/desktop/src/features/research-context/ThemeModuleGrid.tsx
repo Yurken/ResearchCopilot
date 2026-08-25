@@ -8,6 +8,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Link } from "react-router-dom";
+import { CODE_HARNESS_LABELS, CODE_HARNESS_PATHS } from "../code-harness/shared";
+import { useCodeHarnessProvider } from "../code-harness/useCodeHarnessProvider";
 import type { ResearchThemeProgress } from "./shared";
 
 interface ThemeModuleGridProps {
@@ -25,6 +27,7 @@ interface ModuleCard {
 }
 
 export default function ThemeModuleGrid({ progress }: ThemeModuleGridProps) {
+  const { provider: codeHarness } = useCodeHarnessProvider();
   const modules: ModuleCard[] = [
     {
       key: "papers",
@@ -47,11 +50,11 @@ export default function ThemeModuleGrid({ progress }: ThemeModuleGridProps) {
     {
       key: "code",
       label: "代码",
-      to: "/code",
+      to: CODE_HARNESS_PATHS[codeHarness],
       icon: SquareTerminal,
       iconColor: "text-apple-orange",
-      count: "DSH",
-      caption: "官方 Harness",
+      count: CODE_HARNESS_LABELS[codeHarness],
+      caption: codeHarness === "codex" ? "小妍 Web" : "官方 Web",
     },
     {
       key: "submission",

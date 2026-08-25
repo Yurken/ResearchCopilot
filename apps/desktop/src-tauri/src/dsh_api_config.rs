@@ -15,10 +15,10 @@ const DSH_CREDENTIAL_REF: &str = "XIAOYAN_API_KEY";
 
 #[derive(Clone)]
 pub(crate) struct XiaoyanApiProfile {
-    protocol: &'static str,
-    base_url: String,
-    api_key: String,
-    model: String,
+    pub(crate) protocol: &'static str,
+    pub(crate) base_url: String,
+    pub(crate) api_key: String,
+    pub(crate) model: String,
     pub models: Vec<String>,
 }
 

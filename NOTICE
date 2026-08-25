@@ -8,6 +8,10 @@ retains its original copyright and license notice.
 DeepSeek Harness and the DeepSeek fish icon are distributed under the MIT
 License, Copyright (c) 2026 DeepSeek, and retain the upstream license notice.
 
+The Git submodules under vendor/codex-harness, vendor/opencode-harness,
+vendor/pi-harness, and vendor/pi-web retain their respective upstream
+copyright and license notices.
+
 The names "XiaoYan" and "小妍", the project logos, and the project mascot
 are not licensed for trademark use under the Apache License 2.0. See
 TRADEMARKS.md and ASSETS_LICENSE.md for details.

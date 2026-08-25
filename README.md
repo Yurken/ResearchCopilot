@@ -47,7 +47,7 @@
 | 文献与精读 | PDF 管理、全文提取、语义检索、图表识别、翻译与复现指南 |
 | 小妍协同 | 直接对话、任务拆解、技能模板、附件、来源引用与任务中止 |
 | 知识库 | Markdown 笔记、小妍内部自动 LLM Wiki、知识图谱、证据关系与混合 Graph RAG |
-| DSH | 运行 DeepSeek 官方 Harness，支持内置锁定版本、外部版本和小妍 API 配置 |
+| 代码 Harness | 可在 DSH、Codex、OpenCode 与 Pi Web 间切换；直接托管完整 Web 工作区 |
 | 学术写作 | 多文件 LaTeX、预览、诊断、统计、润色、续写与学术翻译 |
 | 投稿管理 | 刊会追踪、投稿看板、版本快照、角色化预审与审稿意见跟踪 |
 | 数据与同步 | 本地数据库、加密配置导出、备份恢复及可选的加密同步 |
@@ -80,7 +80,7 @@ xattr -cr /Applications/小妍.app
 环境要求：Node.js 18+、pnpm 9+、[Rust 工具链](https://rustup.rs/) 以及 Tauri v2 对应平台依赖。
 
 ```bash
-git clone https://github.com/Yurken/xiaoyan.git
+git clone --recurse-submodules https://github.com/Yurken/xiaoyan.git
 cd xiaoyan
 pnpm install
 pnpm dev:desktop
@@ -94,6 +94,7 @@ pnpm lint             # 全工作区 lint
 pnpm test             # 单元与组件测试
 pnpm test:e2e         # 桌面端端到端测试
 pnpm build:desktop    # 构建桌面应用
+pnpm harness:sources:update # 更新四套 Harness 的官方源码指针
 ```
 
 ## 模型配置
@@ -165,7 +166,7 @@ docs: 补充本地开发说明
 
 ## 许可证
 
-项目代码与文档采用 [Apache License 2.0](LICENSE)。`vendor/opencode/` 保留其原始 MIT License。
+项目代码与文档采用 [Apache License 2.0](LICENSE)。`vendor/` 中的第三方源码及 Git submodule 保留各自的上游许可证。
 
 “XiaoYan / 小妍”名称、Logo、海报、应用图标和角色形象不包含在代码许可证的品牌授权中；分发修改版时请使用不同的名称与视觉标识。详见 [商标政策](TRADEMARKS.md)、[素材授权说明](ASSETS_LICENSE.md) 和 [NOTICE](NOTICE)。第三方图标、字体及其他素材仍受各自权利人的条款约束。
 

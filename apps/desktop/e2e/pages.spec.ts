@@ -105,6 +105,41 @@ test.describe("DSH 页面", () => {
   });
 });
 
+test.describe("Codex 页面", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(TAURI_MOCK_SCRIPT);
+    await page.goto("/codex");
+  });
+
+  test("应显示 Codex 标题", async ({ page }) => {
+    await expect(page.getByRole("heading", { name: "Codex Harness" })).toBeVisible();
+  });
+
+  test("应显示启动 Codex 区域", async ({ page }) => {
+    await expect(page.getByRole("heading", { name: "启动 Codex" })).toBeVisible();
+  });
+
+  test("应显示运行环境选项", async ({ page }) => {
+    await expect(page.getByRole("heading", { name: "运行环境" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "本机 Codex" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "外部 Codex" })).toBeVisible();
+  });
+});
+
+test.describe("OpenCode 页面", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(TAURI_MOCK_SCRIPT);
+    await page.goto("/opencode");
+  });
+
+  test("应显示 OpenCode 启动区域", async ({ page }) => {
+    await expect(page.getByRole("heading", { name: "OpenCode", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "启动 OpenCode" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "本机 OpenCode" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "外部 OpenCode" })).toBeVisible();
+  });
+});
+
 test.describe("设置页面", () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(TAURI_MOCK_SCRIPT);

@@ -106,6 +106,7 @@ vi.mock("../../hooks/usePersistentStringState", () => ({
 
 describe("App 路由与导航", () => {
   beforeEach(() => {
+    localStorage.clear();
     resetInvokeMock();
     mockInvoke({
       "get_lock_status": { locked: false },
@@ -152,5 +153,34 @@ describe("App 路由与导航", () => {
       expect(screen.getByLabelText("工具")).toHaveAttribute("href", "/tools");
       expect(screen.getByLabelText("设置")).toHaveAttribute("href", "/settings");
     });
+  });
+
+  it("代码助手切换为 Codex 后侧栏显示 Codex", async () => {
+    window.localStorage.setItem("rc:code-harness-provider", "codex");
+    renderWithRouter(<App />);
+    await waitFor(() => {
+      expect(screen.getByLabelText("Codex")).toBeInTheDocument();
+    });
+    expect(screen.getByLabelText("Codex")).toHaveAttribute("href", "/codex");
+    expect(screen.getByLabelText("Codex").querySelector(".codex-icon")).toBeInTheDocument();
+    expect(screen.queryByLabelText("DSH")).not.toBeInTheDocument();
+  });
+
+  it("代码助手切换为 OpenCode 后侧栏显示 OpenCode", async () => {
+    window.localStorage.setItem("rc:code-harness-provider", "opencode");
+    renderWithRouter(<App />);
+    await waitFor(() => expect(screen.getByLabelText("OpenCode")).toBeInTheDocument());
+    expect(screen.getByLabelText("OpenCode")).toHaveAttribute("href", "/opencode");
+    expect(screen.getByLabelText("OpenCode").querySelector(".opencode-icon")).toBeInTheDocument();
+    expect(screen.queryByLabelText("DSH")).not.toBeInTheDocument();
+  });
+
+  it("代码助手切换为 Pi Web 后侧栏显示 Pi Web", async () => {
+    window.localStorage.setItem("rc:code-harness-provider", "pi");
+    renderWithRouter(<App />);
+    await waitFor(() => expect(screen.getByLabelText("Pi Web")).toBeInTheDocument());
+    expect(screen.getByLabelText("Pi Web")).toHaveAttribute("href", "/pi");
+    expect(screen.getByLabelText("Pi Web").querySelector(".pi-web-icon")).toBeInTheDocument();
+    expect(screen.queryByLabelText("DSH")).not.toBeInTheDocument();
   });
 });

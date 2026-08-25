@@ -13,7 +13,12 @@ import {
   Wrench,
 } from "lucide-react";
 import RouteErrorBoundary from "./components/RouteErrorBoundary";
+import { useCodeHarnessProvider } from "./features/code-harness/useCodeHarnessProvider";
+import { CODE_HARNESS_LABELS, CODE_HARNESS_PATHS, type CodeHarnessProvider } from "./features/code-harness/shared";
+import CodexIcon from "./features/codex/CodexIcon";
 import DeepSeekIcon from "./features/deepseek-harness/DeepSeekIcon";
+import OpenCodeIcon from "./features/opencode/OpenCodeIcon";
+import PiWebIcon from "./features/pi-web/PiWebIcon";
 
 const Home = lazy(() => import("./pages/Home"));
 const Planner = lazy(() => import("./pages/Planner"));
@@ -27,6 +32,9 @@ const Settings = lazy(() => import("./pages/Settings"));
 const Tools = lazy(() => import("./pages/Tools"));
 const Submission = lazy(() => import("./pages/Submission"));
 const Code = lazy(() => import("./pages/Code"));
+const Codex = lazy(() => import("./pages/Codex"));
+const OpenCode = lazy(() => import("./pages/OpenCode"));
+const PiWeb = lazy(() => import("./pages/PiWeb"));
 const Writing = lazy(() => import("./pages/Writing"));
 const ResearchTheme = lazy(() => import("./pages/ResearchTheme"));
 const FocusApp = lazy(() => import("./pages/FocusLayout"));
@@ -52,19 +60,24 @@ import { useFirstRunQuickStart } from "./features/onboarding/useFirstRunQuickSta
 import { SETTINGS_ACTIVE_SECTION_STORAGE_KEY } from "./features/settings/pageConfig";
 import { writePersistentValue } from "./hooks/usePersistentStringState";
 
-const navItems = [
-  { to: "/", icon: LayoutDashboard, label: "首页" },
-  { to: "/planner", icon: Map, label: "规划" },
-  { to: "/chat", icon: MessageSquare, label: "对话" },
-  { to: "/survey", icon: BookOpen, label: "综述" },
-  { to: "/papers", icon: FileText, label: "论文" },
-  { to: "/writing", icon: PenLine, label: "写作" },
-  { to: "/knowledge", icon: Library, label: "知识" },
-  { to: "/code", icon: DeepSeekIcon, label: "DSH" },
-  { to: "/submission", icon: Send, label: "投稿" },
-  { to: "/tools", icon: Wrench, label: "工具" },
-  { to: "/settings", icon: SettingsIcon, label: "设置" },
-] as const;
+function buildNavItems(provider: CodeHarnessProvider) {
+  const icons = { dsh: DeepSeekIcon, codex: CodexIcon, opencode: OpenCodeIcon, pi: PiWebIcon };
+  const codeItem = { to: CODE_HARNESS_PATHS[provider], icon: icons[provider], label: CODE_HARNESS_LABELS[provider] };
+
+  return [
+    { to: "/", icon: LayoutDashboard, label: "首页" },
+    { to: "/planner", icon: Map, label: "规划" },
+    { to: "/chat", icon: MessageSquare, label: "对话" },
+    { to: "/survey", icon: BookOpen, label: "综述" },
+    { to: "/papers", icon: FileText, label: "论文" },
+    { to: "/writing", icon: PenLine, label: "写作" },
+    { to: "/knowledge", icon: Library, label: "知识" },
+    codeItem,
+    { to: "/submission", icon: Send, label: "投稿" },
+    { to: "/tools", icon: Wrench, label: "工具" },
+    { to: "/settings", icon: SettingsIcon, label: "设置" },
+  ];
+}
 
 function LandscapeFocusRouteRedirect() {
   const location = useLocation();
@@ -79,6 +92,8 @@ export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
   const [layoutMode, setCurrentLayoutMode] = useState<LayoutMode>(() => getLayoutMode());
+  const { provider: codeHarness } = useCodeHarnessProvider();
+  const navItems = buildNavItems(codeHarness);
   const { locked, setLocked, lockChecked } = useAppLock();
   const quickStart = useFirstRunQuickStart({ enabled: lockChecked && !locked });
 
@@ -207,9 +222,12 @@ export default function App() {
             <Route path="/papers/:id/reader" element={<RouteErrorBoundary><PaperReader /></RouteErrorBoundary>} />
             <Route path="/writing" element={<RouteErrorBoundary><Writing /></RouteErrorBoundary>} />
             <Route path="/submission" element={<RouteErrorBoundary><Submission /></RouteErrorBoundary>} />
-            <Route path="/experiment" element={<Navigate to="/code" replace />} />
+            <Route path="/experiment" element={<Navigate to={CODE_HARNESS_PATHS[codeHarness]} replace />} />
             <Route path="/tools" element={<RouteErrorBoundary><Tools /></RouteErrorBoundary>} />
             <Route path="/code" element={<RouteErrorBoundary><Code /></RouteErrorBoundary>} />
+            <Route path="/codex" element={<RouteErrorBoundary><Codex /></RouteErrorBoundary>} />
+            <Route path="/opencode" element={<RouteErrorBoundary><OpenCode /></RouteErrorBoundary>} />
+            <Route path="/pi" element={<RouteErrorBoundary><PiWeb /></RouteErrorBoundary>} />
             <Route path="/chat" element={<RouteErrorBoundary><Copilot /></RouteErrorBoundary>} />
             <Route path="/xiaoyan" element={<Navigate to="/chat" replace />} />
             <Route path="/copilot" element={<Navigate to="/chat" replace />} />
