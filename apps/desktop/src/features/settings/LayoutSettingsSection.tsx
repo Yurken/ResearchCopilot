@@ -5,6 +5,7 @@ import type { LayoutMode } from "../../lib/layoutMode";
 import type { ThemePreference } from "../../lib/themeMode";
 import { SectionIcon } from "./shared";
 import ModuleVisibilitySettingsPanel from "../module-visibility/ModuleVisibilitySettingsPanel";
+import CodeHarnessSettingsPanel from "../code-harness/CodeHarnessSettingsPanel";
 
 function OptionCard({
   selected,
@@ -174,13 +175,15 @@ export default function LayoutSettingsSection({
         </div>
       </div>
 
+      <CodeHarnessSettingsPanel />
+
       <ModuleVisibilitySettingsPanel />
 
       <div
         className="rounded-2xl px-4 py-3 text-xs leading-5 text-ink-tertiary"
         style={{ background: "var(--rc-card-inset-bg)", border: "1px solid var(--rc-card-inset-outline)" }}
       >
-        切换布局后应用会自动重启。主题会立即保存并作用到当前窗口。
+        切换布局后应用会自动重启。主题和代码助手会立即保存并作用到当前窗口。
       </div>
     </Card>
   );

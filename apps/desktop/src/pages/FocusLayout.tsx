@@ -7,7 +7,11 @@ import { type LegacyFreeTab } from "../features/focus/shared";
 import Planner from "./Planner";
 import NoteReader from "./NoteReader";
 import PaperReader from "./PaperReader";
+import { useCodeHarnessProvider } from "../features/code-harness/useCodeHarnessProvider";
+import { CODE_HARNESS_PATHS } from "../features/code-harness/shared";
 import Code from "./Code";
+import Codex from "./Codex";
+import OpenCode from "./OpenCode";
 
 function FocusLegacyRouteRedirect({ tab }: { tab: LegacyFreeTab }) {
   const normalized = tab === "copilot" || tab === "xiaoyan" ? "chat" : tab;
@@ -15,6 +19,8 @@ function FocusLegacyRouteRedirect({ tab }: { tab: LegacyFreeTab }) {
 }
 
 export default function FocusApp() {
+  const { provider: codeHarness } = useCodeHarnessProvider();
+
   return (
     <div className="flex h-full bg-nm-bg">
       <main className="flex-1 min-w-0 overflow-hidden">
@@ -32,8 +38,10 @@ export default function FocusApp() {
           <Route path="/xiaoyan" element={<FocusLegacyRouteRedirect tab="xiaoyan" />} />
           <Route path="/copilot" element={<FocusLegacyRouteRedirect tab="copilot" />} />
           <Route path="/tools" element={<FocusLegacyRouteRedirect tab="tools" />} />
-          <Route path="/experiment" element={<Navigate to="/code" replace />} />
+          <Route path="/experiment" element={<Navigate to={CODE_HARNESS_PATHS[codeHarness]} replace />} />
           <Route path="/code" element={<Code />} />
+          <Route path="/codex" element={<Codex />} />
+          <Route path="/opencode" element={<OpenCode />} />
           <Route path="/submission" element={<FocusLegacyRouteRedirect tab="submission" />} />
           <Route path="/notes/:id" element={<NoteReader />} />
           <Route path="/settings" element={<FocusSettingsWrapper />} />
