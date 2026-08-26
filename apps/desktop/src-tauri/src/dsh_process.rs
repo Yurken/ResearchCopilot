@@ -98,7 +98,9 @@ pub fn launch_command(
         command.args(["--profile", config.profile.as_str()]);
     }
     command
-        .args(["--host", "127.0.0.1", "--port", "0"])
+        // `--no-open` 要求 DSH >= 0.1.1：新版 web 子命令默认打开系统浏览器，
+        // 小妍在应用内 iframe 展示 Web UI，必须抑制浏览器弹出。
+        .args(["--host", "127.0.0.1", "--port", "0", "--no-open"])
         .current_dir(workspace)
         .env("DSH_HOME", data_home)
         .env("DSH_TELEMETRY_DISABLED", "1")
