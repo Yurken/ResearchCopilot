@@ -1,6 +1,6 @@
 {
-  "version": "0.1.0-rc.5",
-  "commit": "47f943859bef60e4160492346772ded9b24f765a",
+  "version": "0.1.1-rc.2",
+  "commit": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
   "nodeRequirement": "^22.19.0 || >=24.0.0",
   "source": "https://github.com/deepseek-ai/deepseek-harness"
 }
