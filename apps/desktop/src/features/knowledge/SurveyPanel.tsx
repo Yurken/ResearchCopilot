@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import SurveyComposerPanel from "./SurveyComposerPanel";
 import SurveyHistoryPanel from "./SurveyHistoryPanel";
 import SurveyResultsWorkspace from "./SurveyResultsWorkspace";
+import { listenSurveyGenerated } from "./surveyEvents";
 import { useSurveyGeneration } from "./useSurveyGeneration";
 
 export default function SurveyPanel({ hideInterestPanel = false }: { hideInterestPanel?: boolean }) {
@@ -16,6 +17,9 @@ export default function SurveyPanel({ hideInterestPanel = false }: { hideInteres
     }
     wasGenerating.current = survey.generating;
   }, [survey.generating, survey.structured]);
+
+  // 聊天触发的综述在落库后广播 survey:generated，这里刷新历史列表保持联动。
+  useEffect(() => listenSurveyGenerated(() => setHistoryRefresh((value) => value + 1)), []);
 
   return (
     <div className="min-w-0 flex-1 space-y-3">

@@ -5,6 +5,40 @@ import type { StructuredSurveyResult, SurveyAgentState, SurveyRunSnapshot } from
 
 const SURVEY_RUN_STORAGE_KEY = "rc:survey:active-run";
 
+/** 生成中快照的有效期：正常生成远低于 2 小时，超时视为进程被杀、任务已中断。 */
+export const SURVEY_RUN_SNAPSHOT_TTL_MS = 2 * 60 * 60 * 1000;
+export const SURVEY_RUN_INTERRUPTED_MESSAGE = "上次生成已中断（应用可能已退出），可调整后重新生成。";
+
+/**
+ * 恢复本地持久化的运行快照：校验字段完整性；
+ * running 快照超过 TTL 说明生成进程已被杀掉，降级为 failed，避免页面死锁。
+ */
+export function restoreSurveyRunSnapshot(
+  parsed: SurveyRunSnapshot | null,
+  now: number = Date.now(),
+): SurveyRunSnapshot | null {
+  if (!parsed?.requestId || !parsed.query) return null;
+  const normalized: SurveyRunSnapshot = {
+    ...parsed,
+    content: parsed.content ?? "",
+    agents: Array.isArray(parsed.agents) ? parsed.agents : [],
+    structured: parsed.structured ?? null,
+    litTypes: Array.isArray(parsed.litTypes) ? parsed.litTypes : [],
+    databases: Array.isArray(parsed.databases) ? parsed.databases : [],
+  };
+  if (normalized.status === "running" && now - (normalized.updatedAt || 0) > SURVEY_RUN_SNAPSHOT_TTL_MS) {
+    return {
+      ...normalized,
+      status: "failed",
+      error: SURVEY_RUN_INTERRUPTED_MESSAGE,
+      agents: normalized.agents.map((agent) =>
+        agent.status === "running" ? { ...agent, status: "failed", error: SURVEY_RUN_INTERRUPTED_MESSAGE } : agent,
+      ),
+    };
+  }
+  return normalized;
+}
+
 let activeSnapshot: SurveyRunSnapshot | null = readStoredSnapshot();
 let listenerPromise: Promise<UnlistenFn[]> | null = null;
 const subscribers = new Set<() => void>();
@@ -14,16 +48,7 @@ function readStoredSnapshot(): SurveyRunSnapshot | null {
   try {
     const raw = window.localStorage.getItem(SURVEY_RUN_STORAGE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as SurveyRunSnapshot;
-    if (!parsed?.requestId || !parsed.query) return null;
-    return {
-      ...parsed,
-      content: parsed.content ?? "",
-      agents: Array.isArray(parsed.agents) ? parsed.agents : [],
-      structured: parsed.structured ?? null,
-      litTypes: Array.isArray(parsed.litTypes) ? parsed.litTypes : [],
-      databases: Array.isArray(parsed.databases) ? parsed.databases : [],
-    };
+    return restoreSurveyRunSnapshot(JSON.parse(raw) as SurveyRunSnapshot);
   } catch {
     return null;
   }
@@ -81,10 +106,12 @@ function upsertAgent(agent: SurveyAgentState, fallbackStatus: SurveyAgentState["
       return current;
     }
     const exists = current.agents.some((item) => item.id === nextAgent.id);
+    // 阶段级失败（survey:agent_error）不代表整体失败：后端会降级继续，
+    // 只有 survey:error 才把整体状态置为 failed，避免快照卡死后拒绝后续 running 更新。
     return {
       ...current,
-      status: fallbackStatus === "failed" ? "failed" : current.status === "failed" ? current.status : "running",
-      error: fallbackStatus === "failed" ? nextAgent.error || current.error : current.error,
+      status: current.status === "failed" ? "failed" : "running",
+      error: current.error,
       agents: exists
         ? current.agents.map((item) => (item.id === nextAgent.id ? { ...item, ...nextAgent } : item))
         : [...current.agents, nextAgent],

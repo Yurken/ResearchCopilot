@@ -7,12 +7,15 @@ interface SurveyRunSummaryPanelProps {
   agents: SurveyAgentState[];
   structured: StructuredSurveyResult | null;
   fallbackCitationFormatLabel: string;
+  /** 整体是否已失败；未失败时的阶段失败表示已降级继续。 */
+  runFailed?: boolean;
 }
 
 export default function SurveyRunSummaryPanel({
   agents,
   structured,
   fallbackCitationFormatLabel,
+  runFailed = false,
 }: SurveyRunSummaryPanelProps) {
   return (
     <div className="space-y-4">
@@ -47,6 +50,9 @@ export default function SurveyRunSummaryPanel({
                   <p className={`mt-2 text-xs leading-5 ${agent.error ? "text-apple-red" : "text-ink-secondary"}`}>
                     {agent.error || agent.summary}
                   </p>
+                ) : null}
+                {agent.status === "failed" && !runFailed ? (
+                  <p className="mt-1 text-[11px] text-ink-tertiary">该阶段未成功，已按降级策略继续，不影响整体生成。</p>
                 ) : null}
               </div>
             ))}

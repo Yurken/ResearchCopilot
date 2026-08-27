@@ -563,9 +563,10 @@ async fn dispatch_generate_survey(
     let db_spawn = db.clone();
     let settings_spawn = settings.clone();
     let query_spawn = query.clone();
+    let error_request_id = survey_request_id.clone();
     tauri::async_runtime::spawn(async move {
-        let _ = run_survey_generation(
-            app_spawn,
+        if let Err(error) = run_survey_generation(
+            app_spawn.clone(),
             db_spawn,
             settings_spawn,
             query_spawn,
@@ -579,7 +580,14 @@ async fn dispatch_generate_survey(
             None,
             Some(survey_request_id),
         )
-        .await;
+        .await
+        {
+            // 例如已有综述任务在运行：通知前端，避免聊天侧误以为任务已启动。
+            let _ = app_spawn.emit(
+                "survey:error",
+                json!({ "request_id": error_request_id, "error": error }),
+            );
+        }
     });
 
     Ok(format!(
