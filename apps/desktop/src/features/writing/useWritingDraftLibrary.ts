@@ -1,73 +1,169 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiClient, formatErrorMessage } from "../../lib/client";
 import {
-  DEFAULT_PROJECT_NAME,
   WRITING_ACTIVE_DRAFT_KEY,
   WRITING_LIBRARY_STORAGE_KEY,
-  WRITING_STORAGE_KEY,
-  type LatexTemplate,
   type WritingCreateDraftOptions,
   type WritingDraft,
-  type WritingImageAsset,
+  type WritingDraftPatch,
   type WritingResearchInterestSummary,
-  type WritingTexFile,
-  type WritingTemplateId,
   writingResearchInterestTitle,
 } from "./shared";
+import { createDraftFromTemplate } from "./draftFactory";
+import {
+  isLegacyMigrationPending,
+  loadLocalDraftLibrary,
+  markLegacyMigrationDone,
+  migrateLegacyDrafts,
+  readLegacyDraftsForMigration,
+  type WritingDraftMigrationSummary,
+} from "./legacyDraftLibrary";
 import { getDefaultWritingTemplate, getWritingTemplate } from "./templates";
-import { normalizeWritingTexFiles } from "./texFiles";
 
-interface PersistedWritingState {
-  projectName?: string;
-  templateId?: WritingTemplateId;
-  mainTex?: string;
-  bibtex?: string;
-  texFiles?: WritingTexFile[];
-  notes?: string;
+/** 用于判断草稿内容是否变化（updatedAt 由保存动作自身刷新，不参与比较）。 */
+function draftContentSignature(draft: WritingDraft): string {
+  return JSON.stringify([
+    draft.id,
+    draft.projectName,
+    draft.researchInterestId ?? "",
+    draft.templateId,
+    draft.mainTex,
+    draft.bibtex,
+    draft.texFiles,
+    draft.notes,
+    draft.imageAssets,
+  ]);
 }
 
-interface PersistedWritingLibrary {
-  drafts?: unknown[];
-}
-
-type WritingDraftPatch = Partial<
-  Pick<WritingDraft, "projectName" | "researchInterestId" | "templateId" | "mainTex" | "bibtex" | "texFiles" | "notes" | "imageAssets">
->;
-
-interface LoadedDraftLibrary {
-  drafts: WritingDraft[];
-  activeDraftId: string;
-}
-
+/**
+ * 写作草稿库：后端 SQLite 是唯一数据源，localStorage 只存活跃草稿 id 这类 UI 偏好。
+ * 非 Tauri 环境（或后端异常）降级为旧 localStorage 读写，保持既有行为。
+ * 启动时检测旧 localStorage 草稿库并做一次性导入（成功后写迁移标记，不删旧数据）。
+ */
 export function useWritingDraftLibrary() {
-  const initialLibrary = useMemo(loadDraftLibrary, []);
-  const [drafts, setDrafts] = useState<WritingDraft[]>(initialLibrary.drafts);
-  const [activeDraftId, setActiveDraftId] = useState(initialLibrary.activeDraftId);
+  const [drafts, setDrafts] = useState<WritingDraft[]>([]);
+  const [activeDraftId, setActiveDraftId] = useState("");
+  const [libraryReady, setLibraryReady] = useState(false);
+  const [libraryError, setLibraryError] = useState("");
+  const [migrationSummary, setMigrationSummary] = useState<WritingDraftMigrationSummary | null>(null);
   const [interests, setInterests] = useState<WritingResearchInterestSummary[]>([]);
   const [loadingInterests, setLoadingInterests] = useState(true);
   const [interestError, setInterestError] = useState("");
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
 
-  const activeDraft = useMemo(
-    () => drafts.find((draft) => draft.id === activeDraftId) ?? drafts[0],
-    [activeDraftId, drafts],
-  );
+  /** 已落库草稿的内容签名，用于 debounce 保存时只回写变化的草稿。 */
+  const savedSignaturesRef = useRef<Map<string, string>>(new Map());
+  const backendModeRef = useRef(false);
+
+  const fallbackDraft = useMemo(() => createDraftFromTemplate(getDefaultWritingTemplate()), []);
+  const activeDraft = drafts.find((draft) => draft.id === activeDraftId) ?? drafts[0] ?? fallbackDraft;
 
   useEffect(() => {
-    if (activeDraft) return;
-    const draft = createDraftFromTemplate(getDefaultWritingTemplate());
-    setDrafts([draft]);
-    setActiveDraftId(draft.id);
-  }, [activeDraft]);
+    let cancelled = false;
 
+    const applyLibrary = (nextDrafts: WritingDraft[], nextActiveDraftId: string) => {
+      savedSignaturesRef.current = new Map(
+        nextDrafts.map((draft) => [draft.id, draftContentSignature(draft)]),
+      );
+      setDrafts(nextDrafts);
+      setActiveDraftId(nextActiveDraftId);
+    };
+
+    const bootstrap = async () => {
+      try {
+        let list = await apiClient.writing.listDrafts();
+
+        // 一次性迁移：旧 localStorage 草稿库导入后端（保留原 id 与时间戳）。
+        if (isLegacyMigrationPending()) {
+          const legacyDrafts = readLegacyDraftsForMigration();
+          const summary = await migrateLegacyDrafts({
+            drafts: legacyDrafts,
+            existingIds: new Set(list.map((draft) => draft.id)),
+            importDraft: async (draft) => {
+              await apiClient.writing.createDraft(draft);
+            },
+          });
+          if (summary.failed === 0) {
+            markLegacyMigrationDone(summary);
+          } else {
+            // 失败条目下次启动重试（同 id 已导入的会被跳过）。
+            console.warn("[writing] 旧草稿迁移存在失败条目：", summary.errors);
+          }
+          if (!cancelled) setMigrationSummary(summary);
+          if (summary.imported > 0) {
+            list = await apiClient.writing.listDrafts();
+          }
+        }
+
+        if (list.length === 0) {
+          const draft = createDraftFromTemplate(getDefaultWritingTemplate());
+          await apiClient.writing.createDraft(draft);
+          list = [draft];
+        }
+
+        if (cancelled) return;
+        backendModeRef.current = true;
+        const savedActiveId = localStorage.getItem(WRITING_ACTIVE_DRAFT_KEY) || "";
+        applyLibrary(
+          list,
+          list.some((draft) => draft.id === savedActiveId) ? savedActiveId : list[0].id,
+        );
+      } catch (error) {
+        if (cancelled) return;
+        if (!isMissingTauriRuntime(error)) {
+          setLibraryError(formatErrorMessage(error));
+        }
+        // 降级：沿用旧 localStorage 数据源（含 Web / 测试环境）。
+        const loaded = loadLocalDraftLibrary();
+        applyLibrary(loaded.drafts, loaded.activeDraftId);
+      } finally {
+        if (!cancelled) setLibraryReady(true);
+      }
+    };
+
+    void bootstrap();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // 防抖保存：后端模式下仅回写内容发生变化的草稿；降级模式沿用整库写 localStorage。
   useEffect(() => {
+    if (!libraryReady) return;
     const timer = window.setTimeout(() => {
-      localStorage.setItem(WRITING_LIBRARY_STORAGE_KEY, JSON.stringify({ drafts }));
-      localStorage.setItem(WRITING_ACTIVE_DRAFT_KEY, activeDraftId);
+      try {
+        localStorage.setItem(WRITING_ACTIVE_DRAFT_KEY, activeDraftId);
+      } catch {
+        // localStorage 不可用时仅影响活跃草稿记忆。
+      }
+
+      if (backendModeRef.current) {
+        for (const draft of drafts) {
+          const signature = draftContentSignature(draft);
+          if (savedSignaturesRef.current.get(draft.id) === signature) continue;
+          savedSignaturesRef.current.set(draft.id, signature);
+          const savedSignature = signature;
+          void apiClient.writing.updateDraft(draft).catch((error) => {
+            // 保存失败时撤销签名，下次内容变化会重试。
+            if (savedSignaturesRef.current.get(draft.id) === savedSignature) {
+              savedSignaturesRef.current.delete(draft.id);
+            }
+            if (!isMissingTauriRuntime(error)) {
+              setLibraryError(formatErrorMessage(error));
+            }
+          });
+        }
+      } else {
+        try {
+          localStorage.setItem(WRITING_LIBRARY_STORAGE_KEY, JSON.stringify({ drafts }));
+        } catch {
+          // 与旧行为一致：写失败不打断写作。
+        }
+      }
       setLastSavedAt(new Date());
     }, 350);
     return () => window.clearTimeout(timer);
-  }, [activeDraftId, drafts]);
+  }, [activeDraftId, drafts, libraryReady]);
 
   useEffect(() => {
     let cancelled = false;
@@ -114,8 +210,16 @@ export function useWritingDraftLibrary() {
       templateId: targetTemplate.id,
     });
 
+    savedSignaturesRef.current.set(draft.id, draftContentSignature(draft));
     setDrafts((currentDrafts) => [draft, ...currentDrafts]);
     setActiveDraftId(draft.id);
+    if (backendModeRef.current) {
+      void apiClient.writing.createDraft(draft).catch((error) => {
+        if (!isMissingTauriRuntime(error)) {
+          setLibraryError(formatErrorMessage(error));
+        }
+      });
+    }
     return draft;
   }, [drafts, interests]);
 
@@ -124,9 +228,18 @@ export function useWritingDraftLibrary() {
     const nextDrafts = drafts.filter((draft) => draft.id !== id);
     if (nextDrafts.length === drafts.length) return false;
 
+    savedSignaturesRef.current.delete(id);
     setDrafts(nextDrafts);
     if (id === activeDraftId) {
       setActiveDraftId(nextDrafts[0].id);
+    }
+    if (backendModeRef.current) {
+      // 历史版本由后端级联清理（writing_versions ON DELETE CASCADE）。
+      void apiClient.writing.deleteDraft(id).catch((error) => {
+        if (!isMissingTauriRuntime(error)) {
+          setLibraryError(formatErrorMessage(error));
+        }
+      });
     }
     return true;
   }, [activeDraftId, drafts]);
@@ -138,6 +251,9 @@ export function useWritingDraftLibrary() {
     interests,
     loadingInterests,
     interestError,
+    libraryReady,
+    libraryError,
+    migrationSummary,
     lastSavedAt,
     setActiveDraftId,
     updateActiveDraft,
@@ -146,145 +262,9 @@ export function useWritingDraftLibrary() {
   };
 }
 
-function loadDraftLibrary(): LoadedDraftLibrary {
-  const fallbackDraft = createDraftFromTemplate(getDefaultWritingTemplate());
-
-  try {
-    const raw = localStorage.getItem(WRITING_LIBRARY_STORAGE_KEY);
-    const activeDraftId = localStorage.getItem(WRITING_ACTIVE_DRAFT_KEY) || "";
-    if (raw) {
-      const parsed = JSON.parse(raw) as PersistedWritingLibrary | unknown[];
-      const source = Array.isArray(parsed) ? parsed : parsed.drafts;
-      const drafts = Array.isArray(source)
-        ? source.map(normalizePersistedDraft).filter((draft): draft is WritingDraft => Boolean(draft))
-        : [];
-      if (drafts.length > 0) {
-        return {
-          drafts,
-          activeDraftId: drafts.some((draft) => draft.id === activeDraftId) ? activeDraftId : drafts[0].id,
-        };
-      }
-    }
-
-    const migratedDraft = loadLegacyDraft();
-    if (migratedDraft) {
-      return { drafts: [migratedDraft], activeDraftId: migratedDraft.id };
-    }
-  } catch {
-    return { drafts: [fallbackDraft], activeDraftId: fallbackDraft.id };
-  }
-
-  return { drafts: [fallbackDraft], activeDraftId: fallbackDraft.id };
-}
-
-function loadLegacyDraft(): WritingDraft | null {
-  try {
-    const raw = localStorage.getItem(WRITING_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as PersistedWritingState;
-    const template = parsed.templateId ? getWritingTemplate(parsed.templateId) : getDefaultWritingTemplate();
-    return createDraftFromTemplate(template, {
-      projectName: parsed.projectName || DEFAULT_PROJECT_NAME,
-      templateId: template.id,
-      mainTex: parsed.mainTex || template.mainTex,
-      bibtex: parsed.bibtex ?? template.bibtex,
-      notes: parsed.notes ?? "",
-    });
-  } catch {
-    return null;
-  }
-}
-
-function normalizePersistedDraft(value: unknown): WritingDraft | null {
-  if (!isRecord(value)) return null;
-  const templateId = isWritingTemplateId(value.templateId) ? value.templateId : getDefaultWritingTemplate().id;
-  const template = getWritingTemplate(templateId);
-  const id = stringValue(value.id) || createDraftId();
-  const projectName = stringValue(value.projectName) || DEFAULT_PROJECT_NAME;
-  const researchInterestId = stringValue(value.researchInterestId) || undefined;
-  const createdAt = stringValue(value.createdAt) || new Date().toISOString();
-  const updatedAt = stringValue(value.updatedAt) || createdAt;
-
-  return {
-    id,
-    projectName,
-    researchInterestId,
-    templateId,
-    mainTex: typeof value.mainTex === "string" ? value.mainTex : template.mainTex,
-    bibtex: typeof value.bibtex === "string" ? value.bibtex : template.bibtex,
-    texFiles: normalizeWritingTexFiles(Array.isArray(value.texFiles) ? value.texFiles.filter(isWritingTexFile) : []),
-    notes: typeof value.notes === "string" ? value.notes : "",
-    imageAssets: normalizePersistedImageAssets(value.imageAssets),
-    createdAt,
-    updatedAt,
-  };
-}
-
-function createDraftFromTemplate(
-  template: LatexTemplate,
-  overrides: WritingDraftPatch & Partial<Pick<WritingDraft, "createdAt" | "updatedAt">> = {},
-): WritingDraft {
-  const now = new Date().toISOString();
-  return {
-    id: createDraftId(),
-    projectName: overrides.projectName || DEFAULT_PROJECT_NAME,
-    researchInterestId: overrides.researchInterestId || undefined,
-    templateId: overrides.templateId ?? template.id,
-    mainTex: overrides.mainTex ?? template.mainTex,
-    bibtex: overrides.bibtex ?? template.bibtex,
-    texFiles: normalizeWritingTexFiles(overrides.texFiles ?? []),
-    notes: overrides.notes ?? "",
-    imageAssets: overrides.imageAssets ?? [],
-    createdAt: overrides.createdAt ?? now,
-    updatedAt: overrides.updatedAt ?? now,
-  };
-}
-
 function normalizeDraftPatch(patch: WritingDraftPatch): WritingDraftPatch {
   if (!("researchInterestId" in patch)) return patch;
   return { ...patch, researchInterestId: patch.researchInterestId || undefined };
-}
-
-function createDraftId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `draft-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function isWritingTemplateId(value: unknown): value is WritingTemplateId {
-  return value === "journal" || value === "conference" || value === "thesis-note";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function stringValue(value: unknown): string {
-  return typeof value === "string" ? value : "";
-}
-
-function normalizePersistedImageAssets(value: unknown): WritingImageAsset[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map(normalizePersistedImageAsset)
-    .filter((asset): asset is WritingImageAsset => Boolean(asset));
-}
-
-function isWritingTexFile(value: unknown): value is WritingTexFile {
-  return isRecord(value) && typeof value.path === "string" && typeof value.content === "string";
-}
-
-function normalizePersistedImageAsset(value: unknown): WritingImageAsset | null {
-  if (!isRecord(value)) return null;
-  const id = stringValue(value.id);
-  const fileName = stringValue(value.fileName);
-  const projectPath = stringValue(value.projectPath);
-  const storedPath = stringValue(value.storedPath);
-  const createdAt = stringValue(value.createdAt) || new Date().toISOString();
-
-  if (!id || !fileName || !projectPath || !storedPath) return null;
-  return { id, fileName, projectPath, storedPath, createdAt };
 }
 
 function isMissingTauriRuntime(error: unknown): boolean {
