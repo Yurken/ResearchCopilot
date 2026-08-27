@@ -176,12 +176,14 @@ export function buildVenueTemplatesFromCcfCatalog(entries: CcfEntry[]) {
 }
 
 export function mapCcfEntryToVenueTemplate(entry: CcfEntry): VenueTemplate {
-  const id = normalizeVenueKey(entry.label || entry.full_name);
-  const override = CCFDDL_DEADLINE_OVERRIDES[id];
   const type = entry.kind === "journal" ? "journal" : "conference";
+  const venueKey = normalizeVenueKey(entry.label || entry.full_name);
+  const override = CCFDDL_DEADLINE_OVERRIDES[venueKey];
 
   return {
-    id,
+    // CCF 目录中存在跨领域重名简称（如 TCC、CC、FSE）。使用复合标识，
+    // 避免筛选列表时 React 因重复 key 复用错误的结果卡片。
+    id: `${type}:${entry.area}:${venueKey}:${normalizeVenueKey(entry.full_name)}`,
     name: entry.label,
     fullName: entry.full_name,
     type,
@@ -215,14 +217,21 @@ export function filterVenueTemplates({
   templates: VenueTemplate[];
   type: "all" | "conference" | "journal";
 }) {
-  const normalizedQuery = query.trim().toLowerCase();
+  const queryTerms = normalizeVenueSearchText(query).split(" ").filter(Boolean);
 
   return templates.filter((venue) => {
-    const matchesQuery =
-      !normalizedQuery ||
-      venue.name.toLowerCase().includes(normalizedQuery) ||
-      venue.fullName.toLowerCase().includes(normalizedQuery) ||
-      venue.area.toLowerCase().includes(normalizedQuery);
+    const searchableText = normalizeVenueSearchText([
+      venue.name,
+      venue.fullName,
+      venue.area,
+      venue.publisher,
+      venue.ccf === "none" ? undefined : `CCF ${venue.ccf}`,
+      venue.type === "conference" ? "会议 conference" : "期刊 journal",
+    ].filter(Boolean).join(" "));
+    const compactSearchableText = searchableText.replaceAll(" ", "");
+    const matchesQuery = queryTerms.every((term) => (
+      searchableText.includes(term) || compactSearchableText.includes(term.replaceAll(" ", ""))
+    ));
     const matchesArea = area === "all" || venue.area === area;
     const matchesType = type === "all" || venue.type === type;
     return matchesQuery && matchesArea && matchesType;
@@ -241,6 +250,15 @@ export function normalizeVenueKey(value: string) {
     .toLowerCase()
     .replace(/&/g, "and")
     .replace(/[^a-z0-9]+/g, "");
+}
+
+function normalizeVenueSearchText(value: string) {
+  return value
+    .normalize("NFKC")
+    .toLocaleLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[\s\-_/，,。.、:：;；()（）[\]【】]+/g, " ")
+    .trim();
 }
 
 function areaDisplayName(area: string) {

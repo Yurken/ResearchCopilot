@@ -8,6 +8,7 @@ interface SurveyEventOptions {
   setContent: Dispatch<SetStateAction<string>>;
   setGenerating: Dispatch<SetStateAction<boolean>>;
   setError: Dispatch<SetStateAction<string>>;
+  setActionError: Dispatch<SetStateAction<string>>;
   setAgents: Dispatch<SetStateAction<SurveyAgentState[]>>;
   setStructured: Dispatch<SetStateAction<StructuredSurveyResult | null>>;
   cleanupSurveyListeners: () => void;
@@ -17,12 +18,32 @@ export function createSurveyRequestId() {
   return globalThis.crypto?.randomUUID?.() ?? `survey-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+/** 监听「综述已生成并落库」事件（含聊天触发的生成），用于刷新历史列表等联动。 */
+export function listenSurveyGenerated(onGenerated: () => void): () => void {
+  let disposed = false;
+  let unlisten: (() => void) | undefined;
+  void safeListen("survey:generated", () => {
+    if (!disposed) onGenerated();
+  }).then((cleanup) => {
+    if (disposed) {
+      cleanup();
+    } else {
+      unlisten = cleanup;
+    }
+  });
+  return () => {
+    disposed = true;
+    unlisten?.();
+  };
+}
+
 export async function registerSurveyEventListeners({
   requestIdRef,
   contentRef,
   setContent,
   setGenerating,
   setError,
+  setActionError,
   setAgents,
   setStructured,
   cleanupSurveyListeners,
@@ -40,8 +61,13 @@ export async function registerSurveyEventListeners({
       contentRef.current += event.payload.delta;
       setContent(contentRef.current);
     }),
-    safeListen<{ request_id?: string }>("survey:done", (event) => {
+    safeListen<{ request_id?: string; saved?: boolean; save_error?: string }>("survey:done", (event) => {
       if (!acceptRequest(event.payload.request_id)) return;
+      if (event.payload.saved === false) {
+        setActionError(
+          `综述已生成，但保存到历史记录失败${event.payload.save_error ? `：${event.payload.save_error}` : "。"}当前内容未入库，可通过「存为笔记」留存。`,
+        );
+      }
       setGenerating(false);
       cleanupSurveyListeners();
     }),
@@ -94,9 +120,9 @@ export async function registerSurveyEventListeners({
     }),
     safeListen<{ request_id?: string; agent: SurveyAgentState }>("survey:agent_error", (event) => {
       if (!acceptRequest(event.payload.request_id)) return;
+      // 阶段级失败是非致命的：后端会降级继续，只标记该阶段，整体失败由 survey:error 收口。
       const nextAgent = event.payload.agent;
       setAgents((prev) => prev.map((item) => (item.id === nextAgent.id ? { ...item, ...nextAgent, status: "failed" } : item)));
-      finishWithError(nextAgent.error || "生成未完成，请稍后重试。");
     }),
   ]);
 }
