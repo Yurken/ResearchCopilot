@@ -511,7 +511,7 @@ pub async fn codex_runtime_import_xiaoyan_api(
 mod tests {
     use super::*;
     #[test]
-    fn default_runtime_uses_path_mode() {
-        assert_eq!(CodexRuntimeConfig::default().mode, CodexRuntimeMode::Path);
+    fn default_runtime_uses_bundled_mode() {
+        assert_eq!(CodexRuntimeConfig::default().mode, CodexRuntimeMode::Bundled);
     }
 }
