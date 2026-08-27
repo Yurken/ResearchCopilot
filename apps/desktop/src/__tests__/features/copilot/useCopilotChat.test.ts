@@ -439,10 +439,16 @@ describe("useCopilotChat", () => {
 
     act(() => result.current.stopGenerating());
 
-    await waitFor(() => expect(result.current.sending).toBe(false));
+    // stopGenerating 为让 UI 立即响应会同步退出“生成中”，而 interrupted 标记要等流桥
+    // 在 abort 后收尾（生成器 resolve → for-await 退出 → 微任务链）才写到消息上。
+    // 这里等待标记真正落位，而不是假设它与 sending=false 同步发生。
+    await waitFor(() => {
+      const pending = result.current.messages.find((m) => m.role === "assistant");
+      expect(pending?.status).toBe("interrupted");
+    });
     const assistantMsg = result.current.messages.find((m) => m.role === "assistant");
-    expect(assistantMsg?.status).toBe("interrupted");
     expect(assistantMsg?.content).toContain("部分回答");
+    expect(result.current.sending).toBe(false);
   });
 
   it("模型错误路径将助手消息标记为 failed", async () => {
