@@ -114,6 +114,50 @@ export interface WritingImageAsset {
   createdAt: string;
 }
 
+export type WritingVersionSource = "auto" | "manual";
+
+/** 版本列表条目：不含正文，只带元信息与各字段字符数。 */
+export interface WritingVersionSummary {
+  id: string;
+  draftId: string;
+  source: WritingVersionSource;
+  createdAt: string;
+  mainTexChars: number;
+  bibtexChars: number;
+  texFilesChars: number;
+  notesChars: number;
+}
+
+/** 单个版本的完整快照，用于预览与恢复。 */
+export interface WritingVersionSnapshot {
+  id: string;
+  draftId: string;
+  source: WritingVersionSource;
+  createdAt: string;
+  mainTex: string;
+  bibtex: string;
+  texFiles: WritingTexFile[];
+  notes: string;
+}
+
+export interface WritingVersionRecordResult {
+  recorded: boolean;
+  versionId: string | null;
+  /** 跳过原因："unchanged"（内容未变）或 "throttled"（auto 最小间隔内）。 */
+  reason: string | null;
+}
+
+/** 历史版本可恢复的内容字段。 */
+export type WritingVersionContentPatch = Pick<
+  WritingDraft,
+  "mainTex" | "bibtex" | "texFiles" | "notes"
+>;
+
+/** 草稿内容更新补丁（不含 id 与时间戳）。 */
+export type WritingDraftPatch = Partial<
+  Pick<WritingDraft, "projectName" | "researchInterestId" | "templateId" | "mainTex" | "bibtex" | "texFiles" | "notes" | "imageAssets">
+>;
+
 export interface WritingProjectSnapshot {
   projectName: string;
   mainTex: string;
@@ -145,6 +189,9 @@ export const WRITING_STORAGE_KEY = "rc:writing:workspace:v1";
 export const WRITING_LIBRARY_STORAGE_KEY = "rc:writing:library:v1";
 export const WRITING_ACTIVE_DRAFT_KEY = "rc:writing:active-draft:v1";
 export const DEFAULT_PROJECT_NAME = "xiaoyan-paper";
+/** 历史版本自动记录：内容停止变化后防抖 2s，且距上次记录至少 60s（与后端节流一致）。 */
+export const WRITING_VERSION_AUTO_DEBOUNCE_MS = 2000;
+export const WRITING_VERSION_AUTO_MIN_INTERVAL_MS = 60_000;
 export const MACOS_TEXBIN_PATH = "/Library/TeX/texbin";
 export const LINUX_TEXLIVE_BIN_PATH = "/usr/local/texlive/YYYY/bin/*-linux";
 export const LINUX_TINYTEX_BIN_PATH = "~/.TinyTeX/bin/*-linux";
@@ -164,6 +211,23 @@ export const WRITING_ASSISTANT_ACTIONS: WritingAssistantAction[] = [
 
 export function writingDraftTitle(draft: Pick<WritingDraft, "projectName">): string {
   return draft.projectName.trim() || DEFAULT_PROJECT_NAME;
+}
+
+/** 版本内容的本地签名，用于在 invoke 前快速判断内容是否变化（与后端 hash 去重互补）。 */
+export function writingVersionContentSignature(content: WritingVersionContentPatch): string {
+  return JSON.stringify([content.mainTex, content.bibtex, content.texFiles, content.notes]);
+}
+
+export function formatWritingVersionTime(createdAt: string): string {
+  const date = new Date(createdAt.includes("T") ? createdAt : createdAt.replace(" ", "T") + "Z");
+  if (Number.isNaN(date.getTime())) return createdAt;
+  return date.toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 }
 
 export function writingResearchInterestTitle(

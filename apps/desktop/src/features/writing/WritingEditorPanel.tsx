@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { clsx } from "clsx";
-import { ArrowDown, ArrowUp, ChevronRight, Clipboard, ImagePlus, Replace, Search, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronRight, Clipboard, History, ImagePlus, Replace, Search, X } from "lucide-react";
 import type { MouseEvent, RefObject } from "react";
 import type { WritingAssistantActionId, WritingEditorSource, WritingImageAsset, WritingTexFile } from "./shared";
 import WritingEditorContextMenu from "./WritingEditorContextMenu";
@@ -22,6 +22,7 @@ interface WritingEditorPanelProps {
   onInsertText: (before: string, after?: string) => void;
   onInsertImage: () => void;
   onAssistantAction: (actionId: WritingAssistantActionId) => void;
+  onOpenVersionHistory?: () => void;
   sidebarCollapsed?: boolean;
   onExpandSidebar?: () => void;
 }
@@ -41,6 +42,7 @@ export default function WritingEditorPanel({
   onInsertText,
   onInsertImage,
   onAssistantAction,
+  onOpenVersionHistory,
   sidebarCollapsed,
   onExpandSidebar,
 }: WritingEditorPanelProps) {
@@ -185,6 +187,20 @@ export default function WritingEditorPanel({
           onDeleteTexFile={onDeleteTexFile}
         />
         <div className="ml-auto flex items-center gap-3 px-2">
+          {onOpenVersionHistory && (
+            <>
+              <button
+                type="button"
+                onClick={onOpenVersionHistory}
+                title="历史版本"
+                className="flex h-7 items-center gap-1.5 rounded-lg px-2 text-xs font-semibold text-ink-tertiary transition-colors hover:bg-white/5 hover:text-apple-blue"
+              >
+                <History className="h-3.5 w-3.5" />
+                历史版本
+              </button>
+              <div className="h-3 w-px bg-white/10" />
+            </>
+          )}
           <button
             type="button"
             onClick={() => void onInsertImage()}

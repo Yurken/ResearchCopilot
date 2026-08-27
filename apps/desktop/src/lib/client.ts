@@ -47,6 +47,12 @@ import { streamChat } from "./chatStream";
 import { streamTranslation } from "./translationStream";
 export { streamChat } from "./chatStream";
 import type {
+  WritingDraft,
+  WritingVersionRecordResult,
+  WritingVersionSnapshot,
+  WritingVersionSummary,
+} from "../features/writing/shared";
+import type {
   CitationCentralityEntry,
   CitationPathResult,
   CitationSubgraph,
@@ -1160,6 +1166,37 @@ export const writingApi = {
     invoke<void>("writing_open_mactex_installer"),
   openMactexDownloadPage: () =>
     invoke<void>("writing_open_mactex_download_page"),
+  // 草稿库：后端 SQLite 为唯一数据源，字段与前端 WritingDraft 一致（camelCase）。
+  listDrafts: () =>
+    invoke<WritingDraft[]>("writing_draft_list"),
+  createDraft: (draft: WritingDraft) =>
+    invoke<WritingDraft>("writing_draft_create", { request: draft }),
+  getDraft: (id: string) =>
+    invoke<WritingDraft>("writing_draft_get", { id }),
+  updateDraft: (draft: WritingDraft) =>
+    invoke<void>("writing_draft_update", { request: draft }),
+  /** 删除草稿，历史版本由后端级联清理。 */
+  deleteDraft: (id: string) =>
+    invoke<void>("writing_draft_delete", { id }),
+  // 历史版本：后端只做快照存取，恢复由前端应用。
+  recordVersion: (request: {
+    draftId: string;
+    mainTex: string;
+    bibtex: string;
+    texFiles: WritingTexFilePayload[];
+    notes: string;
+    source: "auto" | "manual";
+    force?: boolean;
+  }) =>
+    invoke<WritingVersionRecordResult>("writing_record_version", { request }),
+  listVersions: (draftId: string) =>
+    invoke<WritingVersionSummary[]>("writing_list_versions", { draftId }),
+  getVersion: (id: string) =>
+    invoke<WritingVersionSnapshot>("writing_get_version", { id }),
+  deleteVersion: (id: string) =>
+    invoke<void>("writing_delete_version", { id }),
+  clearDraftVersions: (draftId: string) =>
+    invoke<void>("writing_clear_draft_versions", { draftId }),
 };
 
 // ── Research Context API ───────────────────────────────────────────

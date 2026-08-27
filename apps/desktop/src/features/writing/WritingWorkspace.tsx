@@ -21,6 +21,7 @@ import WritingLatexInstallNotice from "./WritingLatexInstallNotice";
 import WritingNewDraftModal from "./WritingNewDraftModal";
 import WritingPreviewPanel from "./WritingPreviewPanel";
 import WritingSidebar from "./WritingSidebar";
+import WritingVersionHistoryModal from "./WritingVersionHistoryModal";
 import {
   isLatexCompilerMissing,
   type WritingAssistantActionId,
@@ -48,6 +49,7 @@ export default function WritingWorkspace({
   const showLatexInstallNotice = isLatexCompilerMissing(workspace.compileResult);
   const [draftManagerOpen, setDraftManagerOpen] = useState(false);
   const [newDraftModalOpen, setNewDraftModalOpen] = useState(false);
+  const [versionHistoryOpen, setVersionHistoryOpen] = useState(false);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [assistantRequest, setAssistantRequest] = useState<{
@@ -224,6 +226,7 @@ export default function WritingWorkspace({
             onInsertText={workspace.insertText}
             onInsertImage={workspace.insertImage}
             onAssistantAction={handleAssistantAction}
+            onOpenVersionHistory={() => setVersionHistoryOpen(true)}
             sidebarCollapsed={sidebarCollapsed}
             onExpandSidebar={() => setSidebarCollapsed(false)}
           />
@@ -272,6 +275,22 @@ export default function WritingWorkspace({
         onResearchInterestChange={workspace.setResearchInterestId}
         onTemplateChange={workspace.applyTemplate}
         onReset={workspace.resetWorkspace}
+      />
+
+      <WritingVersionHistoryModal
+        open={versionHistoryOpen}
+        projectName={workspace.projectName}
+        versions={workspace.versionHistory.versions}
+        loading={workspace.versionHistory.loadingVersions}
+        preview={workspace.versionHistory.preview}
+        previewLoading={workspace.versionHistory.previewLoading}
+        error={workspace.versionHistory.error}
+        onClose={() => setVersionHistoryOpen(false)}
+        onRefresh={() => void workspace.versionHistory.refreshVersions()}
+        onSelectVersion={(id) => void workspace.versionHistory.loadVersionPreview(id)}
+        onRestore={(id) => workspace.versionHistory.restoreVersion(id)}
+        onDelete={(id) => workspace.versionHistory.deleteVersion(id)}
+        onRecordManual={() => workspace.versionHistory.recordManualVersion()}
       />
 
       <WritingNewDraftModal

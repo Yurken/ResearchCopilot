@@ -183,6 +183,14 @@ use commands::{
         writing_compile_pdf, writing_copy_pdf, writing_import_image, writing_open_compiled_pdf,
         writing_open_mactex_download_page, writing_open_mactex_installer,
     },
+    writing_drafts::{
+        writing_draft_create, writing_draft_delete, writing_draft_get, writing_draft_list,
+        writing_draft_update,
+    },
+    writing_versions::{
+        writing_clear_draft_versions, writing_delete_version, writing_get_version,
+        writing_list_versions, writing_record_version,
+    },
 };
 use state::{default_settings, AppState};
 
@@ -796,6 +804,16 @@ pub fn run() {
             writing_open_compiled_pdf,
             writing_open_mactex_installer,
             writing_open_mactex_download_page,
+            writing_record_version,
+            writing_list_versions,
+            writing_get_version,
+            writing_delete_version,
+            writing_clear_draft_versions,
+            writing_draft_create,
+            writing_draft_list,
+            writing_draft_get,
+            writing_draft_update,
+            writing_draft_delete,
             // Active Researcher
             active_researcher_scan,
             active_researcher_findings,
