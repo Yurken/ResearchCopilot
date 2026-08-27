@@ -2,6 +2,7 @@ import {
   ChevronLeft,
   MessageSquare,
   MoreHorizontal,
+  Pin,
   Plus,
 } from "lucide-react";
 import { Select } from "@research-copilot/ui";
@@ -79,7 +80,12 @@ export function CopilotSessionSidebar(props: CopilotSessionSidebarProps) {
           />
         ) : (
           <button className="min-w-0 flex-1 text-left" onClick={() => onLoadSession(session)}>
-            <div className="truncate font-medium">{session.title || "新对话"}</div>
+            <div className="flex items-center gap-1 truncate font-medium">
+              {session.pinned && (
+                <Pin className="h-3 w-3 flex-shrink-0 text-ink-tertiary" aria-label="已置顶" />
+              )}
+              <span className="truncate">{session.title || "新对话"}</span>
+            </div>
           </button>
         )}
         <div className="relative flex-shrink-0">
@@ -99,7 +105,7 @@ export function CopilotSessionSidebar(props: CopilotSessionSidebarProps) {
                 className="w-full px-3 py-1.5 text-left text-ink-secondary transition-colors hover:bg-nm-dark/8 hover:text-ink-primary"
                 onClick={() => { onPinSession(session.id); onMenuToggle(null); }}
               >
-                置顶
+                {session.pinned ? "取消置顶" : "置顶"}
               </button>
               <button
                 className="w-full px-3 py-1.5 text-left text-ink-secondary transition-colors hover:bg-nm-dark/8 hover:text-ink-primary"
