@@ -6,7 +6,7 @@ use crate::commands::survey_support::{
     build_timeline_text, survey_planner_system, survey_timeline_system, survey_writer_system,
     SURVEY_PLANNER_TPL, SURVEY_TIMELINE_TPL, SURVEY_WRITER_TPL,
 };
-use crate::links::{paper_reference_url, paper_search_url};
+use crate::links::paper_reference_url;
 use crate::llm::{resolve_model, resolve_temperature, LlmClient, LlmMessage};
 use crate::state::AppState;
 use serde_json::json;
@@ -14,106 +14,6 @@ use sqlx::Row;
 use std::collections::HashSet;
 use tauri::{Emitter, State};
 use uuid::Uuid;
-
-// ── Planner ─────────────────────────────────────────────────────
-
-const PLANNER_TPL: &str = r#"请为研究主题「{topic}」（关键词：{keywords}）规划研究学习路径，仅返回合法 JSON：
-{{
-  "overview": "领域概述（2-3句）",
-  "prerequisites": [{{"name": "前置知识名", "description": "说明", "resources": ["推荐资源"]}}],
-  "learning_stages": [{{"stage": 1, "title": "阶段标题", "duration": "预计时长", "goals": ["学习目标"], "topics": ["学习主题"], "resources": ["资源"]}}],
-  "classic_papers": [{{"title": "论文标题", "authors": "作者", "year": 2020, "venue": "会议/期刊名称", "reason": "推荐理由"}}],
-  "research_directions": [{{"direction": "研究方向", "description": "描述", "open_problems": ["开放问题"]}}],
-  "tools_and_frameworks": ["工具/框架列表"],
-  "communities": ["社区/会议/期刊"]
-}}"#;
-
-fn planner_system() -> String {
-    specialist_system(
-        "研究方向规划助手",
-        "为研究者生成结构化、可执行、可落地的研究学习路径。",
-        Some("输出必须清晰、专业、可直接使用。"),
-    )
-}
-
-pub async fn run_planner_generation(
-    app: tauri::AppHandle,
-    settings: std::collections::HashMap<String, String>,
-    topic: String,
-    keywords: Vec<String>,
-) -> Result<(), String> {
-    let planner_id = Uuid::new_v4().to_string();
-    let _ = app.emit(
-        "interest:agent_start",
-        json!({
-            "id": "planner",
-            "agent": {
-                "id": planner_id,
-                "name": "学习路径规划",
-                "role": "生成研究方向学习计划",
-                "status": "running"
-            }
-        }),
-    );
-    tokio::spawn(async move {
-        let client = match LlmClient::from_settings(&settings) {
-            Ok(c) => c,
-            Err(e) => {
-                let _ = app.emit("planner:error", json!({ "error": e.to_string() }));
-                let _ = app.emit(
-                    "interest:error",
-                    json!({ "id": "planner", "error": e.to_string() }),
-                );
-                return;
-            }
-        };
-        let prompt = PLANNER_TPL
-            .replace("{topic}", &topic)
-            .replace("{keywords}", &keywords.join("、"));
-        let msgs = vec![
-            LlmMessage::system(planner_system()),
-            LlmMessage::user(&prompt),
-        ];
-        let planner_model = resolve_model(&settings, &["planner_generation_model"]);
-        let planner_temperature =
-            resolve_temperature(&settings, "planner_generation_temperature", 0.3);
-        match client
-            .chat(&msgs, planner_model.as_deref(), planner_temperature)
-            .await
-        {
-            Ok(resp) => {
-                let clean = extract_json(&resp);
-                let v: serde_json::Value = enrich_planner_result(
-                    serde_json::from_str(&clean).unwrap_or(json!({"raw": resp})),
-                );
-                let _ = app.emit("planner:result", json!({ "topic": topic, "plan": v }));
-                let _ = app.emit(
-                    "interest:agent_complete",
-                    json!({ "id": "planner", "agent": { "id": planner_id } }),
-                );
-            }
-            Err(e) => {
-                let _ = app.emit("planner:error", json!({ "error": e.to_string() }));
-                let _ = app.emit(
-                    "interest:error",
-                    json!({ "id": "planner", "error": e.to_string() }),
-                );
-            }
-        }
-    });
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn planner_generate(
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
-    topic: String,
-    keywords: Vec<String>,
-) -> Result<(), String> {
-    let settings = state.settings.read().await.clone();
-    run_planner_generation(app, settings, topic, keywords).await
-}
 
 #[tauri::command]
 pub async fn run_survey_generation(
@@ -1134,28 +1034,3 @@ async fn retrieve_papers(
     Ok(papers)
 }
 
-fn enrich_planner_result(mut value: serde_json::Value) -> serde_json::Value {
-    if let Some(papers) = value
-        .get_mut("classic_papers")
-        .and_then(|item| item.as_array_mut())
-    {
-        for paper in papers {
-            if let Some(venue) = paper.get("venue").and_then(|item| item.as_str()) {
-                if let Some(tag) = match_venue(venue) {
-                    paper["ccf_rating"] = json!(tag.rating);
-                    paper["ccf_area"] = json!(tag.area);
-                    paper["ccf_type"] = json!(tag.kind);
-                    paper["ccf_label"] = json!(tag.label);
-                    paper["ccf_publisher"] = json!(tag.publisher);
-                    paper["venue_url"] = json!(tag.url);
-                }
-            }
-            if let Some(title) = paper.get("title").and_then(|item| item.as_str()) {
-                if let Some(url) = paper_search_url(Some(title)) {
-                    paper["paper_url"] = json!(url);
-                }
-            }
-        }
-    }
-    value
-}

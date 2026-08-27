@@ -655,13 +655,6 @@ export const chatApi = {
   stream: streamChat,
 };
 
-// ── Planner ───────────────────────────────────────────────────────
-
-export const plannerApi = {
-  generate: (topic: string, keywords: string[]): Promise<void> =>
-    invoke("planner_generate", { topic, keywords }),
-};
-
 // ── Survey ────────────────────────────────────────────────────────
 
 export const surveyApi = {
@@ -1299,7 +1292,6 @@ export const apiClient = {
   papers: papersApi,
   knowledge: knowledgeApi,
   chat: chatApi,
-  planner: plannerApi,
   survey: surveyApi,
   skills: skillsApi,
   submission: submissionApi,

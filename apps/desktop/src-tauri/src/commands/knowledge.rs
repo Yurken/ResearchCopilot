@@ -9,7 +9,8 @@ use crate::commands::knowledge_hypothesis::{
 };
 use crate::commands::knowledge_notes::note_row_to_json;
 use crate::commands::knowledge_plan_status::{
-    mark_interest_plan_planned, mark_interest_plan_running, restore_interest_plan_status,
+    ensure_interest_not_planning, mark_interest_plan_planned, mark_interest_plan_running,
+    restore_interest_plan_status,
 };
 use crate::commands::memory::{is_long_term_memory_enabled, record_knowledge_note_created_event};
 use crate::links::paper_search_url;
@@ -183,6 +184,11 @@ pub async fn knowledge_delete_interest_bundle(
     // 连同所有子孙文件夹一起删除。
     let interest_ids = collect_interest_subtree_ids(&state.db, &id).await?;
 
+    // 规划生成中的主题（含子孙）不允许删除，避免产生孤儿检查点与幽灵快照。
+    for interest_id in &interest_ids {
+        ensure_interest_not_planning(&state.db, interest_id).await?;
+    }
+
     let mut tx = state.db.begin().await.map_err(|e| e.to_string())?;
     let mut deleted_sessions = 0u64;
     let mut deleted_notes = 0u64;
@@ -239,6 +245,9 @@ pub async fn knowledge_delete_interest_only(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<serde_json::Value, String> {
+    // 规划生成中的主题不允许删除，避免产生孤儿检查点与幽灵快照。
+    ensure_interest_not_planning(&state.db, &id).await?;
+
     let mut tx = state.db.begin().await.map_err(|e| e.to_string())?;
 
     let row = sqlx::query("SELECT parent_id FROM research_interests WHERE id = ?")
@@ -508,11 +517,23 @@ pub async fn knowledge_generate_plan(
     id: String,
     start_step: Option<usize>,
 ) -> Result<(), String> {
+    let settings = state.settings.read().await.clone();
+    run_interest_plan_generation(app, state.db.clone(), settings, id, start_step).await
+}
+
+/// 规划生成主流程（洞见 → 探知 → 谋策），供 Tauri 命令与对话工具 generate_plan 共用。
+pub async fn run_interest_plan_generation(
+    app: tauri::AppHandle,
+    db: sqlx::SqlitePool,
+    settings: std::collections::HashMap<String, String>,
+    id: String,
+    start_step: Option<usize>,
+) -> Result<(), String> {
     let row = sqlx::query(
         "SELECT topic, keywords, profile, hypothesis_card, partial_plan FROM research_interests WHERE id = ?",
     )
     .bind(&id)
-    .fetch_optional(&state.db)
+    .fetch_optional(&db)
     .await
     .map_err(|e| e.to_string())?
     .ok_or("未找到对应研究方向。")?;
@@ -537,13 +558,12 @@ pub async fn knowledge_generate_plan(
 
     let resume_step = start_step.unwrap_or(0);
 
-    mark_interest_plan_running(&state.db, &id).await?;
+    // 并发防护：同一主题已有规划任务在跑时直接拒绝（原子 UPDATE，避免踩踏）。
+    mark_interest_plan_running(&db, &id).await?;
     let _ = app.emit(
         "interest:status",
         json!({ "id": &id, "status": "planning" }),
     );
-    let settings = state.settings.read().await.clone();
-    let db = state.db.clone();
     let rid = id.clone();
 
     tokio::spawn(async move {
@@ -913,10 +933,34 @@ pub async fn knowledge_generate_plan(
         {
             Ok(resp) => {
                 let clean = crate::commands::papers::extract_json_pub(&resp);
-                let mut v: serde_json::Value = enrich_learning_path_json(
-                    serde_json::from_str(&clean).unwrap_or_default(),
-                    &paper_hints,
-                );
+                let mut v = match parse_learning_path_json(&clean, &paper_hints) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        crate::append_diagnostic_log(&format!(
+                            "[planner][{}] 谋策模型输出解析失败: {}",
+                            rid, error
+                        ));
+                        let status = restore_interest_plan_status(&db, &rid)
+                            .await
+                            .unwrap_or_else(|_| "active".to_string());
+                        let _ = app.emit("interest:status", json!({ "id": &rid, "status": status }));
+                        let _ = app.emit(
+                            "interest:agent_error",
+                            json!({
+                                "id": rid,
+                                "agent": {
+                                    "id": &designer_id,
+                                    "name": "谋策模型",
+                                    "role": "生成结构化学习路线",
+                                    "status": "failed",
+                                    "error": &error
+                                }
+                            }),
+                        );
+                        let _ = app.emit("interest:error", json!({ "id": &rid, "error": &error }));
+                        return;
+                    }
+                };
                 ensure_hypothesis_validation(&mut v, hypothesis_card.as_ref());
                 let path_str = serde_json::to_string(&v).unwrap_or_default();
                 if let Err(e) = mark_interest_plan_planned(&db, &rid, &path_str).await {
@@ -1423,6 +1467,29 @@ fn ensure_minimum_classic_papers(
     }
 }
 
+/// 解析谋策模型输出为学习路线 JSON。解析失败、结果不是对象或缺少学习阶段时返回错误，
+/// 调用方必须走失败路径（复位状态、emit error），不得把空路线落库。
+fn parse_learning_path_json(
+    clean: &str,
+    hints: &[PlannerPaperHint],
+) -> Result<serde_json::Value, String> {
+    let parsed: serde_json::Value = serde_json::from_str(clean)
+        .map_err(|e| format!("谋策模型返回的内容不是合法 JSON：{e}"))?;
+    if !parsed.is_object() {
+        return Err("谋策模型返回的内容不是有效的规划 JSON 对象。".to_string());
+    }
+    let enriched = enrich_learning_path_json(parsed, hints);
+    let stage_count = enriched
+        .get("learning_stages")
+        .and_then(|value| value.as_array())
+        .map(|arr| arr.len())
+        .unwrap_or(0);
+    if stage_count == 0 {
+        return Err("谋策模型返回的规划缺少学习阶段（learning_stages），请重试。".to_string());
+    }
+    Ok(enriched)
+}
+
 fn enrich_learning_path_json(
     mut value: serde_json::Value,
     hints: &[PlannerPaperHint],
@@ -1618,4 +1685,84 @@ pub async fn knowledge_web_clip(
     .ok_or("未找到对应笔记。")?;
 
     Ok(note_row_to_json(&row))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{enrich_learning_path_json, parse_learning_path_json, PlannerPaperHint};
+    use serde_json::json;
+
+    fn sample_hint(title: &str) -> PlannerPaperHint {
+        PlannerPaperHint {
+            title: title.to_string(),
+            authors: Some("Alice".to_string()),
+            year: Some(2024),
+            venue: Some("arXiv".to_string()),
+            reason: "测试候选".to_string(),
+            url: Some("https://example.org/paper".to_string()),
+        }
+    }
+
+    #[test]
+    fn parse_learning_path_rejects_invalid_json() {
+        let err = parse_learning_path_json("这不是 JSON", &[]).expect_err("must fail");
+        assert!(err.contains("不是合法 JSON"));
+    }
+
+    #[test]
+    fn parse_learning_path_rejects_non_object_json() {
+        let err = parse_learning_path_json("[1,2,3]", &[]).expect_err("must fail");
+        assert!(err.contains("不是有效的规划 JSON 对象"));
+    }
+
+    #[test]
+    fn parse_learning_path_rejects_empty_stages() {
+        // 解析成功但没有 learning_stages：不允许落库空路线。
+        let err = parse_learning_path_json("{\"overview\":\"概览\"}", &[]).expect_err("must fail");
+        assert!(err.contains("缺少学习阶段"));
+
+        let err = parse_learning_path_json("{\"learning_stages\":[]}", &[]).expect_err("must fail");
+        assert!(err.contains("缺少学习阶段"));
+    }
+
+    #[test]
+    fn parse_learning_path_accepts_valid_plan_and_enriches_papers() {
+        let hints: Vec<PlannerPaperHint> = (0..8)
+            .map(|i| sample_hint(&format!("候选论文 {i}")))
+            .collect();
+        let raw = json!({
+            "overview": "概览",
+            "learning_stages": [{"stage": 1, "title": "入门"}],
+            "classic_papers": [{"title": "经典论文", "venue": "未知会议"}]
+        })
+        .to_string();
+
+        let value = parse_learning_path_json(&raw, &hints).expect("valid plan");
+        assert_eq!(
+            value
+                .get("learning_stages")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.len()),
+            Some(1)
+        );
+        // enrich 会用候选论文池把 classic_papers 补足到最少数量。
+        let papers = value
+            .get("classic_papers")
+            .and_then(|v| v.as_array())
+            .expect("classic_papers array");
+        assert_eq!(papers.len(), 8);
+        // 已有论文保留，候选论文带 paper_url。
+        assert_eq!(papers[0]["title"], json!("经典论文"));
+        assert!(papers[1]["paper_url"].as_str().unwrap().contains("example.org"));
+    }
+
+    #[test]
+    fn enrich_learning_path_fills_missing_paper_url() {
+        let value = enrich_learning_path_json(
+            json!({"classic_papers": [{"title": "Attention Is All You Need", "venue": "NeurIPS"}]}),
+            &[],
+        );
+        let paper = &value["classic_papers"][0];
+        assert!(paper["paper_url"].as_str().unwrap().starts_with("http"));
+    }
 }

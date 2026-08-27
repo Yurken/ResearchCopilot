@@ -16,6 +16,7 @@ import HypothesisValidationPlan from "./HypothesisValidationPlan";
 import {
   applyInterestPlanSnapshots,
   failInterestPlanRun,
+  isInterestPlanBusyError,
   removeInterestPlanSnapshot,
   resumeInterestPlanRun,
   startInterestPlanRun,
@@ -271,6 +272,11 @@ export default function InterestsPanel() {
       setNotice("");
     } catch (nextError) {
       const message = formatErrorMessage(nextError);
+      if (isInterestPlanBusyError(message)) {
+        // 后端已有规划任务在跑：保留 planning 展示，仅提示用户等待。
+        setError(message);
+        return;
+      }
       failInterestPlanRun(interest.id, message);
       setError(message);
     }
@@ -539,6 +545,8 @@ export default function InterestsPanel() {
                           variant="secondary"
                           onClick={() => void handleDeleteInterest(interest.id)}
                           loading={deletingInterestId === interest.id}
+                          disabled={interest.status === "planning"}
+                          title={interest.status === "planning" ? "规划生成中，完成后才能删除该主题" : undefined}
                         >
                           确认
                         </Button>
@@ -551,6 +559,8 @@ export default function InterestsPanel() {
                         size="sm"
                         variant="secondary"
                         onClick={() => setConfirmDeleteId(interest.id)}
+                        disabled={interest.status === "planning"}
+                        title={interest.status === "planning" ? "规划生成中，完成后才能删除该主题" : undefined}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                         删除
