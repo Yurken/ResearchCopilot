@@ -1,7 +1,8 @@
 use crate::ccf;
 use crate::commands::arxiv::run_arxiv_search;
+use crate::commands::knowledge::run_interest_plan_generation;
 use crate::commands::knowledge_notes::create_note_core;
-use crate::commands::misc::{run_planner_generation, run_survey_generation};
+use crate::commands::misc::run_survey_generation;
 use crate::journal_partitions;
 use crate::llm::{ToolCall, ToolDefinition};
 use serde_json::json;
@@ -110,7 +111,7 @@ fn generate_survey_tool() -> ToolDefinition {
 pub fn generate_plan_tool() -> ToolDefinition {
     ToolDefinition {
         name: "generate_plan".into(),
-        description: "为指定的研究方向生成系统化的学习路线规划。规划包含前置知识、阶段划分、经典论文推荐、研究方向和工具框架。当用户想探索某个研究主题、需要学习路线指引时使用。注意：规划生成需要调用AI模型，预计需要30-60秒，完成后结果会出现在规划页面。".into(),
+        description: "为已有的研究主题生成系统化的学习路线规划。topic 需与规划页面中已创建的研究主题一致；若主题不存在，会引导用户先到规划页面创建。规划生成需要调用AI模型，预计需要1-2分钟，进度和结果会实时出现在规划页面。".into(),
         parameters: json!({
             "type": "object",
             "properties": {
@@ -266,7 +267,7 @@ pub async fn dispatch_tool(
         "generate_survey" => {
             dispatch_generate_survey(app, db, settings, tool_call, request_id).await
         }
-        "generate_plan" => dispatch_generate_plan(app, settings, tool_call, request_id).await,
+        "generate_plan" => dispatch_generate_plan(app, db, settings, tool_call, request_id).await,
         "search_arxiv" => dispatch_search_arxiv(settings, tool_call).await,
         "query_journal" => dispatch_query_journal(tool_call).await,
         "lookup_ccf" => dispatch_lookup_ccf(tool_call).await,
@@ -592,29 +593,36 @@ async fn dispatch_generate_survey(
 
 async fn dispatch_generate_plan(
     app: &tauri::AppHandle,
+    db: &sqlx::SqlitePool,
     settings: &std::collections::HashMap<String, String>,
     tool_call: &ToolCall,
     request_id: &str,
 ) -> Result<String, String> {
     let topic = parse_str_arg(&tool_call.arguments, "topic");
-    let keywords: Vec<String> = serde_json::from_str::<serde_json::Value>(&tool_call.arguments)
-        .ok()
-        .and_then(|v| {
-            v.get("keywords").and_then(|arr| {
-                arr.as_array().map(|a| {
-                    a.iter()
-                        .filter_map(|s| s.as_str().map(|s| s.to_string()))
-                        .collect()
-                })
-            })
-        })
-        .unwrap_or_default();
 
     if topic.is_empty() {
         return Err("研究方向主题不能为空。".into());
     }
 
-    let plan_id = uuid::Uuid::new_v4().to_string();
+    // 委托既有 knowledge 规划管线：按主题名定位已创建的研究主题，
+    // 复用 knowledge_generate_plan 的同一管线（结果落库并走 interest:* 事件），
+    // 不再使用旧的 run_planner_generation 死管线。
+    let interest_id: Option<String> = sqlx::query_scalar(
+        "SELECT id FROM research_interests \
+         WHERE LOWER(TRIM(topic)) = LOWER(?) ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(topic.trim())
+    .fetch_optional(db)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let Some(interest_id) = interest_id else {
+        return Ok(format!(
+            "尚未创建研究主题「{}」。学习路线规划依附于研究主题：请先在规划页面创建该主题（可补充关键词与研究目标），然后在规划页面生成学习路线。",
+            topic
+        ));
+    };
+
     let _ = app.emit(
         "chat:tool_result",
         json!({
@@ -622,25 +630,20 @@ async fn dispatch_generate_plan(
             "tool_name": tool_call.name,
             "tool_id": tool_call.id,
             "result": format!("已触发学习路线规划：{}", topic),
-            "result_id": plan_id
+            "result_id": interest_id
         }),
     );
     let _ = app.emit(
         "interest:plan_triggered",
-        json!({ "request_id": plan_id, "topic": topic }),
+        json!({ "request_id": interest_id, "topic": topic }),
     );
 
-    let app_spawn = app.clone();
-    let settings_spawn = settings.clone();
-    let topic_spawn = topic.clone();
-    let keywords_spawn = keywords;
-    tauri::async_runtime::spawn(async move {
-        let _ =
-            run_planner_generation(app_spawn, settings_spawn, topic_spawn, keywords_spawn).await;
-    });
+    // 同一主题已有任务在跑时，这里会返回明确的并发错误，直接反馈给用户。
+    run_interest_plan_generation(app.clone(), db.clone(), settings.clone(), interest_id, None)
+        .await?;
 
     Ok(format!(
-        "已开始生成研究方向「{}」的学习路线规划，预计需要30-60秒。规划包含前置知识、阶段划分、经典论文推荐和开放问题。完成后请查看规划页面获取完整计划。",
+        "已开始为研究主题「{}」生成学习路线规划（洞见拆解 → 参考论文筛选 → 结构化路线三个步骤），预计需要 1-2 分钟。规划页面会实时展示进度，完成后结果自动保存到该主题。",
         topic
     ))
 }
