@@ -37,7 +37,7 @@ fn bundled_paths(app: &AppHandle) -> Result<BundledDshPaths, String> {
     };
     if !paths.node.is_file() || !paths.entry.is_file() {
         return Err(
-            "当前安装包未包含完整的 DSH 运行时，请重新构建内置运行时或切换到外部 DSH".to_string(),
+            "当前安装包未包含完整的 DSH 运行时，请重新构建内置运行时或切换到自定义 DSH".to_string(),
         );
     }
     Ok(paths)

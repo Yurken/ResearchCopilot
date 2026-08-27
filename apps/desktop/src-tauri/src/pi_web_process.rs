@@ -130,10 +130,10 @@ pub fn resolve_executable(config: &PiWebRuntimeConfig) -> Result<PathBuf, String
                 .as_deref()
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-                .ok_or_else(|| "请先选择外部 Pi Web 可执行文件".to_string())?;
+                .ok_or_else(|| "请先选择自定义 Pi Web 可执行文件".to_string())?;
             let path = Path::new(executable);
             if path.components().count() > 1 && !path.is_file() {
-                return Err("外部 Pi Web 可执行文件不存在".to_string());
+                return Err("自定义 Pi Web 可执行文件不存在".to_string());
             }
             Ok(path.to_path_buf())
         }

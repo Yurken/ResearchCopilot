@@ -364,7 +364,7 @@ pub async fn opencode_runtime_stop(
 pub async fn opencode_runtime_validate_external(executable: String) -> Result<String, String> {
     let executable = executable.trim();
     if executable.is_empty() {
-        return Err("请先选择外部 OpenCode 可执行文件".to_string());
+        return Err("请先选择自定义 OpenCode 可执行文件".to_string());
     }
     validate_secure_version(Path::new(executable)).await
 }

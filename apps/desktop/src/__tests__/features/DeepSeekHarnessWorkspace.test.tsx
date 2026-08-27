@@ -67,7 +67,7 @@ describe("DeepSeekHarnessWorkspace", () => {
     render(<DeepSeekHarnessWorkspace />);
     await screen.findByText("内置 DSH");
 
-    await user.click(screen.getByRole("button", { name: /外部 DSH/ }));
+    await user.click(screen.getByRole("button", { name: /自定义 DSH/ }));
     await user.type(screen.getByLabelText("dsh 可执行文件"), "/usr/local/bin/dsh");
     await user.click(screen.getByRole("button", { name: "启动 DSH" }));
 
