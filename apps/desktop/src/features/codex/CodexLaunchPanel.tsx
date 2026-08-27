@@ -66,9 +66,12 @@ export default function CodexLaunchPanel({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [externalVersion, setExternalVersion] = useState("");
   const phase = runtime.snapshot?.phase ?? "stopped";
-  const canStart = draft.mode === "path"
-    ? Boolean(runtime.snapshot?.pathAvailable)
-    : Boolean(draft.externalExecutable?.trim());
+  const canStart =
+    draft.mode === "bundled"
+      ? Boolean(runtime.snapshot?.bundledAvailable || runtime.snapshot?.pathAvailable)
+      : draft.mode === "path"
+        ? Boolean(runtime.snapshot?.pathAvailable)
+        : Boolean(draft.externalExecutable?.trim());
 
   const pickExecutable = async () => {
     const selected = await runtime.chooseFile("选择 codex 可执行文件");
@@ -103,7 +106,14 @@ export default function CodexLaunchPanel({
             <p className="mt-1 text-xs leading-5 text-ink-tertiary">使用官方 app-server 协议，由小妍提供独立 Web 页面、进程和本地容器。</p>
           </div>
 
-          <div className="mt-4 grid gap-1 rounded-[22px] p-1 sm:grid-cols-2" style={{ background: "var(--rc-chip-inset-bg)", boxShadow: "var(--rc-chip-inset-shadow)" }}>
+          <div className="mt-4 grid gap-1 rounded-[22px] p-1 sm:grid-cols-3" style={{ background: "var(--rc-chip-inset-bg)", boxShadow: "var(--rc-chip-inset-shadow)" }}>
+            <RuntimeModeOption
+              mode="bundled"
+              active={draft.mode === "bundled"}
+              title="内置 Codex"
+              description="小妍自带的官方 harness，无需安装"
+              onSelect={(mode) => onDraftChange("mode", mode)}
+            />
             <RuntimeModeOption
               mode="path"
               active={draft.mode === "path"}
@@ -120,11 +130,26 @@ export default function CodexLaunchPanel({
             />
           </div>
 
+          {draft.mode === "bundled" && !runtime.snapshot?.bundledAvailable && (
+            <div className="mt-4 flex gap-2.5 rounded-2xl border border-amber-700/15 bg-amber-50/60 px-3.5 py-3 text-amber-900">
+              <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+              <p className="text-xs leading-5">
+                {runtime.snapshot?.pathAvailable
+                  ? "当前构建未包含内置 Codex 运行时，将回退到已安装版本。可执行 pnpm codex:prepare-runtime 生成内置运行时。"
+                  : "当前构建未包含内置 Codex 运行时，也未在环境中发现已安装版本。可执行 pnpm codex:prepare-runtime 生成内置运行时，或执行 `brew install --cask codex` / `npm i -g @openai/codex`。"}
+              </p>
+            </div>
+          )}
+
           {draft.mode === "path" && !runtime.snapshot?.pathAvailable && (
             <div className="mt-4 flex gap-2.5 rounded-2xl border border-amber-700/15 bg-amber-50/60 px-3.5 py-3 text-amber-900">
               <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
               <p className="text-xs leading-5">未找到官方 Codex Harness。可执行 `brew install --cask codex` 或 `npm i -g @openai/codex`，或改为自定义可执行文件。</p>
             </div>
+          )}
+
+          {draft.mode === "bundled" && runtime.snapshot?.bundledExecutable && (
+            <p className="mt-3 text-xs text-ink-tertiary">内置运行时 {runtime.snapshot.bundledExecutable}</p>
           )}
 
           {draft.mode === "path" && runtime.snapshot?.pathExecutable && (

@@ -223,6 +223,7 @@ backend/.venv/
 apps/desktop/src-tauri/gen/schemas/windows-schema.json
 apps/desktop/src-tauri/*.db
 apps/desktop/src-tauri/resources/dsh/runtime/
+apps/desktop/src-tauri/resources/codex/runtime/
 
 # Local workspace / generated artifacts
 .workbuddy/

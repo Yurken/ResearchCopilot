@@ -208,7 +208,9 @@ pub fn path_available() -> bool {
 
 pub fn resolve_executable(config: &CodexRuntimeConfig) -> Result<PathBuf, String> {
     match config.mode {
-        CodexRuntimeMode::Path => find_codex()
+        // Bundled 由 CodexRuntimeState::resolve_mode_executable 处理（需要 resource_dir），
+        // 走到这里说明调用方未经过 state，退化为已安装版本发现逻辑。
+        CodexRuntimeMode::Bundled | CodexRuntimeMode::Path => find_codex()
             .ok_or_else(|| "未找到官方 Codex Harness，请先安装或改为指定可执行文件".to_string()),
         CodexRuntimeMode::External => {
             let executable = config

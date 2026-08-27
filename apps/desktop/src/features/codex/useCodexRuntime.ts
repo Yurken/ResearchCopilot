@@ -51,7 +51,7 @@ export function useCodexRuntime() {
 
   useEffect(() => {
     if (!snapshot) return;
-    const missingRuntime = snapshot.phase === "stopped" && !snapshot.pathAvailable;
+    const missingRuntime = snapshot.phase === "stopped" && !snapshot.pathAvailable && !snapshot.bundledAvailable;
     if (!["starting", "running"].includes(snapshot.phase) && !missingRuntime) return;
     const interval = window.setInterval(() => void refresh(), 1500);
     return () => window.clearInterval(interval);
