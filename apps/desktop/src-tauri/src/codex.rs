@@ -1,7 +1,7 @@
 use crate::append_diagnostic_log;
 use crate::codex_api_config::{write_codex_api_configuration, CodexApiImportResult};
 use crate::codex_process::{
-    allocate_loopback_port, format_exit_error, launch_app_server, path_available,
+    allocate_loopback_port, find_codex, format_exit_error, launch_app_server, path_available,
     resolve_executable, stop_child,
 };
 use crate::codex_web::{self, CodexWebServer};
@@ -28,6 +28,8 @@ const CODEX_SOURCE: &str = "https://github.com/openai/codex";
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CodexRuntimeMode {
+    /// 小妍自带的内置运行时（resources/codex），缺失时回退到已安装版本
+    Bundled,
     Path,
     External,
 }
@@ -44,7 +46,7 @@ pub struct CodexRuntimeConfig {
 impl Default for CodexRuntimeConfig {
     fn default() -> Self {
         Self {
-            mode: CodexRuntimeMode::Path,
+            mode: CodexRuntimeMode::Bundled,
             external_executable: None,
             external_home: None,
             workspace_dir: None,
@@ -69,6 +71,8 @@ pub struct CodexRuntimeSnapshot {
     url: Option<String>,
     error: Option<String>,
     logs: Vec<String>,
+    bundled_available: bool,
+    bundled_executable: Option<String>,
     path_available: bool,
     path_executable: Option<String>,
     source: String,
@@ -141,14 +145,16 @@ impl RuntimeInner {
 #[derive(Clone)]
 pub struct CodexRuntimeState {
     app_data_dir: PathBuf,
+    resource_dir: Option<PathBuf>,
     inner: Arc<Mutex<RuntimeInner>>,
 }
 
 impl CodexRuntimeState {
-    pub fn new(app_data_dir: PathBuf) -> Self {
+    pub fn new(app_data_dir: PathBuf, resource_dir: Option<PathBuf>) -> Self {
         let config = read_config(&app_data_dir).unwrap_or_default();
         Self {
             app_data_dir,
+            resource_dir,
             inner: Arc::new(Mutex::new(RuntimeInner::new(config))),
         }
     }
@@ -157,6 +163,27 @@ impl CodexRuntimeState {
     }
     fn isolated_home(&self) -> PathBuf {
         self.app_data_dir.join("codex/home")
+    }
+    /// 内置运行时：安装包 resources/codex/runtime/bin 下的 codex 二进制
+    fn bundled_executable(&self) -> Option<PathBuf> {
+        let binary = self
+            .resource_dir
+            .as_ref()?
+            .join("resources")
+            .join("codex")
+            .join("runtime")
+            .join("bin")
+            .join(if cfg!(windows) { "codex.exe" } else { "codex" });
+        binary.is_file().then_some(binary)
+    }
+    /// 内置模式：优先小妍自带二进制，缺失时回退到环境中已安装的官方版本
+    fn resolve_mode_executable(&self, config: &CodexRuntimeConfig) -> Result<PathBuf, String> {
+        if config.mode == CodexRuntimeMode::Bundled {
+            return self.bundled_executable().or_else(find_codex).ok_or_else(|| {
+                "未找到内置 Codex 运行时或已安装的官方 Codex Harness。可执行 pnpm codex:prepare-runtime 生成内置运行时，或按官方方式安装 Codex".to_string()
+            });
+        }
+        resolve_executable(config)
     }
     fn data_home(&self, config: &CodexRuntimeConfig) -> PathBuf {
         config
@@ -201,7 +228,7 @@ fn normalize_config(mut config: CodexRuntimeConfig) -> CodexRuntimeConfig {
         .filter(|value| !value.is_empty());
     config
 }
-fn validate_config(config: &CodexRuntimeConfig) -> Result<(), String> {
+fn validate_config(state: &CodexRuntimeState, config: &CodexRuntimeConfig) -> Result<(), String> {
     if let Some(workspace) = config
         .workspace_dir
         .as_deref()
@@ -213,6 +240,9 @@ fn validate_config(config: &CodexRuntimeConfig) -> Result<(), String> {
     }
     if config.mode == CodexRuntimeMode::External {
         resolve_executable(config)?;
+    }
+    if config.mode == CodexRuntimeMode::Bundled {
+        state.resolve_mode_executable(config)?;
     }
     Ok(())
 }
@@ -242,8 +272,10 @@ async fn snapshot(state: &CodexRuntimeState) -> CodexRuntimeSnapshot {
         url: inner.url.clone(),
         error: inner.error.clone(),
         logs: inner.logs.iter().cloned().collect(),
+        bundled_executable: state.bundled_executable().map(|path| path.display().to_string()),
+        bundled_available: state.bundled_executable().is_some(),
         path_available: path_available(),
-        path_executable: crate::codex_process::find_codex().map(|path| path.display().to_string()),
+        path_executable: find_codex().map(|path| path.display().to_string()),
         source: CODEX_SOURCE.to_string(),
         data_home: state.data_home(&inner.config).display().to_string(),
     }
@@ -295,7 +327,7 @@ pub async fn codex_runtime_configure(
     config: CodexRuntimeConfig,
 ) -> Result<CodexRuntimeSnapshot, String> {
     let config = normalize_config(config);
-    validate_config(&config)?;
+    validate_config(state.inner(), &config)?;
     {
         let mut inner = state.inner.lock().await;
         inner.refresh_child_status();
@@ -333,7 +365,7 @@ pub async fn codex_runtime_start(
         fs::create_dir_all(&data_home)
             .map_err(|error| format!("创建 Codex 数据目录失败：{error}"))?;
         let workspace = workspace_dir(state.inner(), &config)?;
-        let executable = resolve_executable(&config)?;
+        let executable = state.resolve_mode_executable(&config)?;
         let listen_url = format!("ws://127.0.0.1:{}", allocate_loopback_port()?);
         let mut command = launch_app_server(
             &executable,
@@ -479,7 +511,7 @@ pub async fn codex_runtime_import_xiaoyan_api(
 mod tests {
     use super::*;
     #[test]
-    fn default_runtime_uses_path_mode() {
-        assert_eq!(CodexRuntimeConfig::default().mode, CodexRuntimeMode::Path);
+    fn default_runtime_uses_bundled_mode() {
+        assert_eq!(CodexRuntimeConfig::default().mode, CodexRuntimeMode::Bundled);
     }
 }

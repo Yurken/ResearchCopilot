@@ -23,6 +23,8 @@ const stoppedSnapshot: CodexRuntimeSnapshot = {
   logs: [],
   pathAvailable: true,
   pathExecutable: "/usr/local/bin/codex",
+  bundledAvailable: false,
+  bundledExecutable: null,
   source: "https://github.com/openai/codex",
   dataHome: "/tmp/xiaoyan/codex/home",
 };
@@ -49,6 +51,7 @@ describe("CodexWorkspace", () => {
 
     expect(await screen.findByRole("heading", { name: "启动 Codex" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Codex Harness" })).toBeInTheDocument();
+    expect(screen.getByText("内置 Codex")).toBeInTheDocument();
     expect(screen.getByText("已安装 Codex")).toBeInTheDocument();
     expect(screen.queryByText("小妍代码")).not.toBeInTheDocument();
     expect(screen.queryByText("DeepSeek Harness")).not.toBeInTheDocument();

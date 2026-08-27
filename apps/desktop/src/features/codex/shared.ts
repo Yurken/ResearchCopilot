@@ -1,4 +1,4 @@
-export type CodexRuntimeMode = "path" | "external";
+export type CodexRuntimeMode = "bundled" | "path" | "external";
 export type CodexRuntimePhase = "stopped" | "starting" | "running" | "failed";
 
 export interface CodexRuntimeConfig {
@@ -14,6 +14,8 @@ export interface CodexRuntimeSnapshot {
   url: string | null;
   error: string | null;
   logs: string[];
+  bundledAvailable: boolean;
+  bundledExecutable: string | null;
   pathAvailable: boolean;
   pathExecutable: string | null;
   source: string;
@@ -27,7 +29,7 @@ export interface CodexApiImportResult {
 }
 
 export const DEFAULT_CODEX_CONFIG: CodexRuntimeConfig = {
-  mode: "path",
+  mode: "bundled",
   externalExecutable: null,
   externalHome: null,
   workspaceDir: null,

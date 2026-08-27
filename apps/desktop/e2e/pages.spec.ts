@@ -121,6 +121,7 @@ test.describe("Codex 页面", () => {
 
   test("应显示运行环境选项", async ({ page }) => {
     await expect(page.getByRole("heading", { name: "运行环境" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "内置 Codex" })).toBeVisible();
     await expect(page.getByRole("button", { name: "已安装 Codex" })).toBeVisible();
     await expect(page.getByRole("button", { name: "自定义 Codex" })).toBeVisible();
   });

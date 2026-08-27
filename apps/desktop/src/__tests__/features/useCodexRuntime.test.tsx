@@ -17,6 +17,8 @@ const stoppedSnapshot: CodexRuntimeSnapshot = {
   logs: [],
   pathAvailable: true,
   pathExecutable: "/usr/local/bin/codex",
+  bundledAvailable: false,
+  bundledExecutable: null,
   source: "https://github.com/openai/codex",
   dataHome: "/tmp/xiaoyan/codex/home",
 };

@@ -350,7 +350,10 @@ pub fn run() {
                 .expect("failed to get app data dir");
 
             app.manage(dsh::DshRuntimeState::new(app_data_dir.clone()));
-            app.manage(codex::CodexRuntimeState::new(app_data_dir.clone()));
+            app.manage(codex::CodexRuntimeState::new(
+                app_data_dir.clone(),
+                app.path().resource_dir().ok(),
+            ));
             app.manage(opencode::OpenCodeRuntimeState::new(app_data_dir.clone()));
             app.manage(pi_web::PiWebRuntimeState::new(app_data_dir.clone()));
 
