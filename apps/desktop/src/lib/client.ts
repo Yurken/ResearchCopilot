@@ -645,6 +645,13 @@ export const chatApi = {
     }),
   listAgentRuns: (sessionId: string, requestId?: string): Promise<AgentRun[]> =>
     invoke("chat_list_agent_runs", { sessionId, requestId: requestId ?? null }),
+  /** 从某条消息起截断会话（删除该消息及其后所有消息），供重试/编辑重发前调用。 */
+  truncateSession: (sessionId: string, messageId: string): Promise<{ removed: number }> =>
+    invoke("chat_truncate_session", { sessionId, messageId }),
+  renameSession: (id: string, title: string): Promise<ChatSession> =>
+    invoke("chat_rename_session", { id, title }),
+  setSessionPinned: (id: string, pinned: boolean): Promise<ChatSession> =>
+    invoke("chat_set_session_pinned", { id, pinned }),
   stream: streamChat,
 };
 

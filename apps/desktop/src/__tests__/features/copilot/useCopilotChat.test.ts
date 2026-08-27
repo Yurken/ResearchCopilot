@@ -4,11 +4,12 @@ import type { ChatStreamChunk, Skill } from "@research-copilot/types";
 import { useCopilotChat } from "../../../features/copilot/useCopilotChat";
 import { ToolSkillNotImplementedError } from "../../../features/tools/registry/executeToolSkill";
 
-const { mockStream, mockMemoryAdd, mockEnsureSession, mockSaveMessage } = vi.hoisted(() => ({
+const { mockStream, mockMemoryAdd, mockEnsureSession, mockSaveMessage, mockTruncateSession } = vi.hoisted(() => ({
   mockStream: vi.fn(),
   mockMemoryAdd: vi.fn(),
   mockEnsureSession: vi.fn(),
   mockSaveMessage: vi.fn(),
+  mockTruncateSession: vi.fn(),
 }));
 
 const { mockExecuteToolSkill } = vi.hoisted(() => ({
@@ -17,7 +18,12 @@ const { mockExecuteToolSkill } = vi.hoisted(() => ({
 
 vi.mock("../../../lib/client", () => ({
   apiClient: {
-    chat: { stream: mockStream, ensureSession: mockEnsureSession, saveMessage: mockSaveMessage },
+    chat: {
+      stream: mockStream,
+      ensureSession: mockEnsureSession,
+      saveMessage: mockSaveMessage,
+      truncateSession: mockTruncateSession,
+    },
     memory: { add: mockMemoryAdd },
     settings: { get: vi.fn() },
   },
@@ -58,6 +64,32 @@ function createStreamThatStallsAfterDone() {
   return iterator;
 }
 
+/** 先吐一个 delta，之后一直挂起，直到调用方 abort signal 才结束（模拟真实流桥在取消时收尾）。 */
+function createInterruptibleStream(chunks: ChatStreamChunk[]) {
+  return (_body: unknown, signal?: AbortSignal): AsyncIterableIterator<ChatStreamChunk> => {
+    let index = 0;
+    return {
+      next: () => {
+        const chunk = chunks[index++];
+        if (chunk) return Promise.resolve({ value: chunk, done: false });
+        return new Promise<IteratorResult<ChatStreamChunk>>((resolve) => {
+          if (signal?.aborted) {
+            resolve({ value: undefined, done: true });
+            return;
+          }
+          signal?.addEventListener("abort", () => resolve({ value: undefined, done: true }), {
+            once: true,
+          });
+        });
+      },
+      return: () => Promise.resolve({ value: undefined, done: true }),
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+    };
+  };
+}
+
 const pptSkill: Skill = {
   id: "ppt",
   name: "ppt-generate",
@@ -90,9 +122,12 @@ describe("useCopilotChat", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockMemoryAdd.mockResolvedValue(undefined);
-    mockStream.mockReturnValue(createStreamThatStallsAfterDone());
+    mockStream.mockImplementation(() => createStreamThatStallsAfterDone());
     mockEnsureSession.mockResolvedValue({ id: "session-1", title: "测试", context_type: "general" });
-    mockSaveMessage.mockResolvedValue({});
+    mockSaveMessage.mockImplementation((input: { role: string }) =>
+      Promise.resolve({ id: `db-${input.role}-1` }),
+    );
+    mockTruncateSession.mockResolvedValue({ removed: 1 });
   });
 
   it("收到完成事件后立即恢复发送按钮，不等待流桥收尾", async () => {
@@ -239,5 +274,207 @@ describe("useCopilotChat", () => {
       expect.objectContaining({ context_type: "paper", context_id: "paper-1" }),
       expect.any(AbortSignal),
     );
+  });
+
+  it("发送时用户消息使用稳定 id 并传给后端作为落库主键", async () => {
+    const { result } = renderHook(() => useCopilotChat({
+      currentSession: null,
+      selectedInterestId: "",
+      chatMode: "direct",
+      skills: [],
+      selectedSkillId: null,
+      attachments: [],
+      clearAttachments: vi.fn(),
+      onSessionCreated: vi.fn(),
+    }));
+
+    act(() => result.current.setInput("你好"));
+    await act(async () => result.current.handleSend());
+
+    await waitFor(() => expect(result.current.sending).toBe(false));
+    const userMsg = result.current.messages.find((m) => m.role === "user");
+    expect(userMsg?.id).toBeTruthy();
+    expect(mockStream).toHaveBeenCalledWith(
+      expect.objectContaining({ user_message_id: userMsg?.id }),
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("重试先截断 DB 会话再重发，且复用同一用户消息 id", async () => {
+    const currentSession = {
+      id: "s1",
+      title: "会话",
+      context_type: "general",
+      created_at: "2026-08-26T00:00:00Z",
+      updated_at: null,
+    };
+    const { result } = renderHook(() => useCopilotChat({
+      currentSession,
+      selectedInterestId: "",
+      chatMode: "direct",
+      skills: [],
+      selectedSkillId: null,
+      attachments: [],
+      clearAttachments: vi.fn(),
+      onSessionCreated: vi.fn(),
+    }));
+
+    act(() => result.current.setInput("原始问题"));
+    await act(async () => result.current.handleSend());
+    await waitFor(() => expect(result.current.sending).toBe(false));
+
+    const userMsg = result.current.messages.find((m) => m.role === "user");
+    const assistantMsg = result.current.messages.find((m) => m.role === "assistant");
+    expect(userMsg && assistantMsg).toBeTruthy();
+
+    act(() => result.current.retry(assistantMsg!.id));
+
+    await waitFor(() => {
+      expect(mockTruncateSession).toHaveBeenCalledWith("s1", userMsg!.id);
+    });
+    await waitFor(() => expect(mockStream).toHaveBeenCalledTimes(2));
+    expect(mockStream).toHaveBeenLastCalledWith(
+      expect.objectContaining({ message: "原始问题", user_message_id: userMsg!.id }),
+      expect.any(AbortSignal),
+    );
+    // UI 列表依旧只有一轮（用户消息 + 新助手占位），不产生重复消息。
+    await waitFor(() => expect(result.current.sending).toBe(false));
+    expect(result.current.messages.filter((m) => m.role === "user")).toHaveLength(1);
+    expect(result.current.messages.filter((m) => m.role === "assistant")).toHaveLength(1);
+  });
+
+  it("编辑重发先截断 DB 再用新文本重发", async () => {
+    const currentSession = {
+      id: "s1",
+      title: "会话",
+      context_type: "general",
+      created_at: "2026-08-26T00:00:00Z",
+      updated_at: null,
+    };
+    const { result } = renderHook(() => useCopilotChat({
+      currentSession,
+      selectedInterestId: "",
+      chatMode: "direct",
+      skills: [],
+      selectedSkillId: null,
+      attachments: [],
+      clearAttachments: vi.fn(),
+      onSessionCreated: vi.fn(),
+    }));
+
+    act(() => result.current.setInput("原始问题"));
+    await act(async () => result.current.handleSend());
+    await waitFor(() => expect(result.current.sending).toBe(false));
+
+    const userMsg = result.current.messages.find((m) => m.role === "user");
+    act(() => result.current.editAndResend(userMsg!.id, "改成这个问题"));
+
+    await waitFor(() => {
+      expect(mockTruncateSession).toHaveBeenCalledWith("s1", userMsg!.id);
+    });
+    await waitFor(() => expect(mockStream).toHaveBeenCalledTimes(2));
+    expect(mockStream).toHaveBeenLastCalledWith(
+      expect.objectContaining({ message: "改成这个问题", user_message_id: userMsg!.id }),
+      expect.any(AbortSignal),
+    );
+    await waitFor(() => expect(result.current.sending).toBe(false));
+    expect(result.current.messages.find((m) => m.role === "user")?.content).toBe("改成这个问题");
+  });
+
+  it("截断 DB 失败时中止重发并提示错误", async () => {
+    mockTruncateSession.mockRejectedValue(new Error("db locked"));
+    const currentSession = {
+      id: "s1",
+      title: "会话",
+      context_type: "general",
+      created_at: "2026-08-26T00:00:00Z",
+      updated_at: null,
+    };
+    const { result } = renderHook(() => useCopilotChat({
+      currentSession,
+      selectedInterestId: "",
+      chatMode: "direct",
+      skills: [],
+      selectedSkillId: null,
+      attachments: [],
+      clearAttachments: vi.fn(),
+      onSessionCreated: vi.fn(),
+    }));
+
+    act(() => result.current.setInput("原始问题"));
+    await act(async () => result.current.handleSend());
+    await waitFor(() => expect(result.current.sending).toBe(false));
+
+    const assistantMsg = result.current.messages.find((m) => m.role === "assistant");
+    act(() => result.current.retry(assistantMsg!.id));
+
+    await waitFor(() => expect(result.current.loadError).toContain("重发前清理旧消息失败"));
+    // 重发被中止：不会再发起第二次流式请求，避免 DB 再次分叉。
+    expect(mockStream).toHaveBeenCalledTimes(1);
+  });
+
+  it("用户终止后助手消息保留部分内容并标记 interrupted", async () => {
+    mockStream.mockImplementation(
+      createInterruptibleStream([
+        { type: "request_id", value: "request-1" },
+        { type: "delta", value: "部分回答" },
+      ]),
+    );
+    const { result } = renderHook(() => useCopilotChat({
+      currentSession: null,
+      selectedInterestId: "",
+      chatMode: "direct",
+      skills: [],
+      selectedSkillId: null,
+      attachments: [],
+      clearAttachments: vi.fn(),
+      onSessionCreated: vi.fn(),
+    }));
+
+    act(() => result.current.setInput("写一篇长文"));
+    await act(async () => {
+      void result.current.handleSend();
+    });
+    await waitFor(() => expect(result.current.sending).toBe(true));
+
+    act(() => result.current.stopGenerating());
+
+    // stopGenerating 为让 UI 立即响应会同步退出“生成中”，而 interrupted 标记要等流桥
+    // 在 abort 后收尾（生成器 resolve → for-await 退出 → 微任务链）才写到消息上。
+    // 这里等待标记真正落位，而不是假设它与 sending=false 同步发生。
+    await waitFor(() => {
+      const pending = result.current.messages.find((m) => m.role === "assistant");
+      expect(pending?.status).toBe("interrupted");
+    });
+    const assistantMsg = result.current.messages.find((m) => m.role === "assistant");
+    expect(assistantMsg?.content).toContain("部分回答");
+    expect(result.current.sending).toBe(false);
+  });
+
+  it("模型错误路径将助手消息标记为 failed", async () => {
+    mockStream.mockImplementation(
+      createInterruptibleStream([
+        { type: "request_id", value: "request-1" },
+        { type: "error", value: "模型服务不可用" },
+      ]),
+    );
+    const { result } = renderHook(() => useCopilotChat({
+      currentSession: null,
+      selectedInterestId: "",
+      chatMode: "direct",
+      skills: [],
+      selectedSkillId: null,
+      attachments: [],
+      clearAttachments: vi.fn(),
+      onSessionCreated: vi.fn(),
+    }));
+
+    act(() => result.current.setInput("你好"));
+    await act(async () => result.current.handleSend());
+
+    await waitFor(() => expect(result.current.sending).toBe(false));
+    const assistantMsg = result.current.messages.find((m) => m.role === "assistant");
+    expect(assistantMsg?.status).toBe("failed");
+    expect(assistantMsg?.content).toBe("模型服务不可用");
   });
 });

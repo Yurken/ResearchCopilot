@@ -544,6 +544,8 @@ export interface ChatSession {
   context_type: string;
   context_id?: string;
   tag?: string;
+  /** 是否置顶；列表按 pinned 优先、updated_at 倒序排列（桌面端持久化）。 */
+  pinned?: boolean;
   created_at: string;
   updated_at: string | null;
   messages?: ChatMessage[];
@@ -596,6 +598,8 @@ export interface ChatMessage {
   images?: ChatImageRef[];
   /** 工具技能执行后返回的文件产物，会随消息持久化。 */
   artifacts?: Artifact[];
+  /** 完成状态：interrupted = 用户终止（内容为已完成部分）；failed = 模型/网络错误。缺省视为 completed。 */
+  status?: "completed" | "interrupted" | "failed";
   created_at: string;
 }
 

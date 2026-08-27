@@ -89,6 +89,14 @@ export function getCopilotInputPlaceholder(mode: ChatMode) {
     : `告诉我你的研究任务，我会先拆解步骤，再逐步推进 · ${shortcut}`;
 }
 
+/** 生成稳定的消息 id（发送时传给后端作为落库主键，保证前后端 id 一致，重试/编辑重发可精确截断 DB）。 */
+export function createCopilotMessageId() {
+  return (
+    globalThis.crypto?.randomUUID?.() ??
+    `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`
+  );
+}
+
 const NODE_ORDER: Exclude<AgentGraphNodeKey, "start">[] = [
   "retrieval",
   "planner",

@@ -3,6 +3,7 @@ import {
   applySkillVariables,
   buildCopilotMessageContent,
   buildSkillInjectedText,
+  createCopilotMessageId,
   extractSkillVariables,
   upsertAgentRun,
 } from "./shared";
@@ -211,11 +212,13 @@ export function useCopilotChat(options: UseCopilotChatOptions) {
 
   // 流式对话核心：接收已构建好的发送内容与「基础消息列表」（含用户消息、不含助手占位），
   // 追加助手占位后驱动流式响应。handleSend / retry / editAndResend 共用，避免重复流式逻辑。
+  // userMessageId：基础列表中本轮用户消息的稳定 id，原样传给后端作为落库主键（保证前后端一致）。
   const runChatStream = useCallback(
     async (
       submittedText: string,
       buildBaseMessages: (prev: ChatMessage[]) => ChatMessage[],
       images: Array<{ data: string; mediaType: string }> = [],
+      userMessageId?: string,
     ) => {
       const assistantId = `${Date.now()}_a`;
 
@@ -249,6 +252,8 @@ export function useCopilotChat(options: UseCopilotChatOptions) {
 
       try {
         let sessionId = currentSession?.id;
+        // 本轮助手消息的最终状态：completed（正常）/ interrupted（用户终止）/ failed（模型或网络错误）。
+        let streamStatus: ChatMessage["status"] = "completed";
 
         stream: for await (const chunk of apiClient.chat.stream(
           {
@@ -258,6 +263,7 @@ export function useCopilotChat(options: UseCopilotChatOptions) {
             context_id: contextId || selectedInterestId || undefined,
             chat_mode: chatMode,
             images: images.length ? images : undefined,
+            user_message_id: userMessageId,
           },
           abortController.signal
         )) {
@@ -302,9 +308,10 @@ export function useCopilotChat(options: UseCopilotChatOptions) {
             );
           }
           if (chunk.type === "error") {
+            streamStatus = "failed";
             setMessages((prev) =>
               prev.map((m) =>
-                m.id === assistantId ? { ...m, content: chunk.value || "请求未完成，请稍后重试。" } : m
+                m.id === assistantId ? { ...m, content: chunk.value || "请求未完成，请稍后重试。", status: "failed" } : m
               )
             );
             // error 是终态事件，不再等待事件桥关闭，避免输入框一直显示“终止”。
@@ -322,6 +329,10 @@ export function useCopilotChat(options: UseCopilotChatOptions) {
           cancelAnimationFrame(rafRef.current);
           rafRef.current = 0;
         }
+        // 用户终止（abort）时流桥静默结束：已收到的部分内容保留，并标记为 interrupted。
+        if (abortController.signal.aborted && streamStatus === "completed") {
+          streamStatus = "interrupted";
+        }
         if (streamingContentRef.current) {
           const finalContent = streamingContentRef.current;
           setMessages((prev) =>
@@ -329,16 +340,29 @@ export function useCopilotChat(options: UseCopilotChatOptions) {
           );
           streamingContentRef.current = "";
         }
+        if (streamStatus !== "completed") {
+          const finalStatus = streamStatus;
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantId ? { ...m, status: finalStatus } : m))
+          );
+        }
 
         if (sessionId && !currentSession && !abortController.signal.aborted) {
           promoteDraftSession(sessionId);
           onSessionCreated(sessionId);
         }
       } catch (error) {
-        if ((error as Error)?.name !== "AbortError") {
+        if ((error as Error)?.name === "AbortError") {
+          // 取消：保留已累积的部分内容，标记 interrupted（后端 chat_cancel 会同步落库）。
+          setMessages((prev) =>
+            prev.map((item) =>
+              item.id === assistantId ? { ...item, status: "interrupted" } : item
+            )
+          );
+        } else {
           const msg = `请求未完成：${formatErrorMessage(error)}`;
           setMessages((prev) =>
-            prev.map((item) => (item.id === assistantId ? { ...item, content: msg } : item))
+            prev.map((item) => (item.id === assistantId ? { ...item, content: msg, status: "failed" } : item))
           );
         }
       } finally {
@@ -389,7 +413,8 @@ export function useCopilotChat(options: UseCopilotChatOptions) {
       });
 
       const userMsg: ChatMessage = {
-        id: Date.now().toString(),
+        // 稳定 id：随请求传给后端作为落库主键，保证前端列表与 DB 一致，重试/编辑重发可精确截断。
+        id: createCopilotMessageId(),
         role: "user",
         content: submittedText,
         images: imageAttachments.length
@@ -402,7 +427,7 @@ export function useCopilotChat(options: UseCopilotChatOptions) {
       clearAttachments();
       // 技能默认 one-shot：发完即通知调用方清除选中（锁定时调用方自行跳过）。
       if (skill) onSkillConsumed?.();
-      await runChatStream(submittedText, (prev) => [...prev, userMsg], images);
+      await runChatStream(submittedText, (prev) => [...prev, userMsg], images, userMsg.id);
     },
     [attachments, clearAttachments, runChatStream, onSkillConsumed],
   );
@@ -424,7 +449,7 @@ export function useCopilotChat(options: UseCopilotChatOptions) {
 
       const assistantId = `${Date.now()}_a`;
       const userMsg: ChatMessage = {
-        id: `${Date.now()}_u`,
+        id: createCopilotMessageId(),
         role: "user",
         content: rawText,
         created_at: new Date().toISOString(),
@@ -481,7 +506,7 @@ export function useCopilotChat(options: UseCopilotChatOptions) {
           prev.map((m) => (m.id === assistantId ? finalAssistant : m))
         );
 
-        // 持久化到会话
+        // 持久化到会话；落库后用 DB 主键回写本地消息 id，保证后续重试/编辑重发能精确截断 DB。
         const session = await apiClient.chat.ensureSession({
           sessionId: currentSession?.id,
           title: rawText.slice(0, 40),
@@ -489,17 +514,26 @@ export function useCopilotChat(options: UseCopilotChatOptions) {
           contextId: selectedInterestId || undefined,
         });
 
-        await apiClient.chat.saveMessage({
+        const savedUser = await apiClient.chat.saveMessage({
           session_id: session.id,
           role: "user",
           content: rawText,
         });
-        await apiClient.chat.saveMessage({
+        const savedAssistant = await apiClient.chat.saveMessage({
           session_id: session.id,
           role: "assistant",
           content: result.content,
           artifacts: result.artifacts,
         });
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === userMsg.id
+              ? { ...m, id: savedUser.id }
+              : m.id === assistantId
+                ? { ...m, id: savedAssistant.id }
+                : m
+          )
+        );
 
         if (!currentSession) {
           promoteDraftSession(session.id);
@@ -577,6 +611,23 @@ export function useCopilotChat(options: UseCopilotChatOptions) {
 
   const cancelSkillFill = useCallback(() => setPendingSkillFill(null), []);
 
+  // 重试/编辑重发前先把 DB 会话从目标用户消息起截断（含该消息），
+  // 后端重新落库后与前端列表保持一致。截断失败时中止重发并提示，避免再次分叉。
+  // 草稿会话（尚无 session id，DB 中无记录）直接跳过截断。
+  const truncateForResend = useCallback(
+    async (fromMessageId: string) => {
+      if (!currentSessionId) return true;
+      try {
+        await apiClient.chat.truncateSession(currentSessionId, fromMessageId);
+        return true;
+      } catch (error) {
+        setLoadError(`重发前清理旧消息失败：${formatErrorMessage(error)}`);
+        return false;
+      }
+    },
+    [currentSessionId],
+  );
+
   // 重新生成：复用目标助手消息之前那条用户消息（其 content 即原始发送内容，已含附件上下文）。
   const retry = useCallback(
     (assistantMsgId: string) => {
@@ -587,11 +638,14 @@ export function useCopilotChat(options: UseCopilotChatOptions) {
       let userIdx = assistantIdx - 1;
       while (userIdx >= 0 && list[userIdx].role !== "user") userIdx -= 1;
       if (userIdx < 0) return;
+      const userMessage = list[userIdx];
       const base = list.slice(0, userIdx + 1);
-      const images = (list[userIdx].images ?? []).map((im) => ({ data: im.data, mediaType: im.mediaType }));
-      void runChatStream(list[userIdx].content, () => base, images);
+      const images = (userMessage.images ?? []).map((im) => ({ data: im.data, mediaType: im.mediaType }));
+      void truncateForResend(userMessage.id).then((ok) => {
+        if (ok) void runChatStream(userMessage.content, () => base, images, userMessage.id);
+      });
     },
-    [sending, runChatStream]
+    [sending, runChatStream, truncateForResend]
   );
 
   // 编辑并重发：用新文本替换该用户消息（保留其原有附件上下文块），截断其后所有消息后重发。
@@ -608,9 +662,11 @@ export function useCopilotChat(options: UseCopilotChatOptions) {
       const updatedUser: ChatMessage = { ...list[idx], content: submittedText };
       const base = [...list.slice(0, idx), updatedUser];
       const images = (list[idx].images ?? []).map((im) => ({ data: im.data, mediaType: im.mediaType }));
-      void runChatStream(submittedText, () => base, images);
+      void truncateForResend(messageId).then((ok) => {
+        if (ok) void runChatStream(submittedText, () => base, images, messageId);
+      });
     },
-    [sending, runChatStream]
+    [sending, runChatStream, truncateForResend]
   );
 
   return {

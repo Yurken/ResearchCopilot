@@ -1,4 +1,6 @@
 use sqlx::SqlitePool;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex as StdMutex;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{Mutex, RwLock};
 
@@ -282,6 +284,44 @@ pub fn default_settings() -> HashMap<String, String> {
     m
 }
 
+/// 一次流式对话的运行时元数据：
+/// - `partial`：已累计的助手回答增量（delta 原文拼接），取消/失败时用于补写部分消息。
+/// - `persisted`：助手消息是否已落库（正常完成或失败路径写入后置位），
+///   防止 chat_cancel 与任务自身收尾重复插入。
+pub struct ChatStreamMeta {
+    pub session_id: String,
+    pub partial: StdMutex<String>,
+    pub persisted: AtomicBool,
+}
+
+impl ChatStreamMeta {
+    pub fn new(session_id: String) -> Self {
+        Self {
+            session_id,
+            partial: StdMutex::new(String::new()),
+            persisted: AtomicBool::new(false),
+        }
+    }
+
+    pub fn push_delta(&self, delta: &str) {
+        if let Ok(mut partial) = self.partial.lock() {
+            partial.push_str(delta);
+        }
+    }
+
+    pub fn take_partial(&self) -> String {
+        self.partial
+            .lock()
+            .map(|partial| partial.clone())
+            .unwrap_or_default()
+    }
+
+    /// 标记已落库；返回此前是否已落库（false = 本次调用负责写入）。
+    pub fn mark_persisted(&self) -> bool {
+        self.persisted.swap(true, Ordering::SeqCst)
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub db: SqlitePool,
@@ -289,6 +329,10 @@ pub struct AppState {
     pub settings: Arc<RwLock<HashMap<String, String>>>,
     /// Active chat stream handles keyed by request_id.
     pub chat_handles: Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>,
+    /// 活跃 chat 流的元数据（部分内容缓冲 + 落库标记），供取消/错误路径补写部分回答。
+    /// 在流启动前注册，保证最早的 delta 也能被记录；用 std Mutex 以便
+    /// emit_agent_event 等同步上下文访问（锁内不做 await）。
+    pub chat_stream_meta: Arc<StdMutex<HashMap<String, Arc<ChatStreamMeta>>>>,
     /// Active translation stream handles keyed by request_id.
     pub translation_handles: Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>,
     /// Active code assistant stream handles keyed by request_id.
@@ -304,11 +348,24 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// 记录流式增量到对应请求的部分内容缓冲（请求已结束/不存在时忽略）。
+    pub fn record_chat_delta(&self, request_id: &str, delta: &str) {
+        let meta = self
+            .chat_stream_meta
+            .lock()
+            .ok()
+            .and_then(|registry| registry.get(request_id).cloned());
+        if let Some(meta) = meta {
+            meta.push_delta(delta);
+        }
+    }
+
     pub fn new(db: SqlitePool, settings: HashMap<String, String>) -> Self {
         Self {
             db,
             settings: Arc::new(RwLock::new(settings)),
             chat_handles: Arc::new(Mutex::new(HashMap::new())),
+            chat_stream_meta: Arc::new(StdMutex::new(HashMap::new())),
             translation_handles: Arc::new(Mutex::new(HashMap::new())),
             code_handles: Arc::new(Mutex::new(HashMap::new())),
             code_permissions: Arc::new(Mutex::new(HashMap::new())),

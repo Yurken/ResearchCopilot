@@ -65,7 +65,8 @@ use commands::{
     ccf::{ccf_list, ccf_lookup},
     chat::{
         chat_cancel, chat_delete_session, chat_ensure_session, chat_get_session,
-        chat_list_agent_runs, chat_list_sessions, chat_save_message, chat_stream,
+        chat_list_agent_runs, chat_list_sessions, chat_rename_session, chat_save_message,
+        chat_set_session_pinned, chat_stream, chat_truncate_session,
         chat_update_session_context,
     },
     citation_graph::{
@@ -646,6 +647,9 @@ pub fn run() {
             chat_list_agent_runs,
             chat_stream,
             chat_cancel,
+            chat_truncate_session,
+            chat_rename_session,
+            chat_set_session_pinned,
             // Skills
             skills_list,
             skills_create,
