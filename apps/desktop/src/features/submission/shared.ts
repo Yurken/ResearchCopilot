@@ -365,6 +365,22 @@ export function getDaysUntil(date: Date): number {
   return Math.ceil((date.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
 }
 
+// 本地日期格式化：写库用本地日期，避免 toISOString() 按 UTC 换算导致日期偏移一天
+export function formatLocalDate(date: Date): string {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+// 解析 YYYY-MM-DD 为本地零点：避免 new Date("YYYY-MM-DD") 按 UTC 解析导致负时区偏移一天
+export function parseLocalDate(value: string): Date | undefined {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return undefined;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
 export function getDdlStyle(days: number): { label: string; color: string; bg: string } {
   if (days < 0) return { label: "已截止", color: "#8E8E93", bg: "rgba(142,142,147,0.12)" };
   if (days <= 7) return { label: `${days} 天`, color: "#FF3B30", bg: "rgba(255,59,48,0.12)" };
@@ -486,6 +502,12 @@ function dateField(row: UnknownRow, key: string): Date | undefined {
   const value = row[key];
   if (typeof value !== "string" && typeof value !== "number" && !(value instanceof Date)) {
     return undefined;
+  }
+
+  // 日期型字符串（YYYY-MM-DD）按本地零点解析，避免 UTC 解析在负时区偏移一天
+  if (typeof value === "string") {
+    const localDate = parseLocalDate(value);
+    if (localDate) return localDate;
   }
 
   const date = new Date(value);

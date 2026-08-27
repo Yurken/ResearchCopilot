@@ -12,8 +12,12 @@ export function useSubmissionVersions(
   const [versionsBySubmission, setVersionsBySubmission] = useState<VersionsBySubmission>({});
   const [renamingVersionId, setRenamingVersionId] = useState<string | null>(null);
 
+  // 只在投稿 id 集合变化时重拉：看板推进/回退只改状态，不应触发对所有投稿的版本全量 N+1 重拉
+  const submissionIdsKey = submissions.map((submission) => submission.id).join("\n");
+
   useEffect(() => {
-    if (submissions.length === 0) {
+    const submissionIds = submissionIdsKey ? submissionIdsKey.split("\n") : [];
+    if (submissionIds.length === 0) {
       setVersionsBySubmission({});
       return;
     }
@@ -21,10 +25,10 @@ export function useSubmissionVersions(
     let cancelled = false;
 
     Promise.allSettled(
-      submissions.map(async (submission) => {
-        const response = await submissionApi.listVersions(submission.id);
+      submissionIds.map(async (submissionId) => {
+        const response = await submissionApi.listVersions(submissionId);
         return {
-          submissionId: submission.id,
+          submissionId,
           versions: (response.versions as unknown[]).map(rowToVersion),
         };
       })
@@ -38,7 +42,7 @@ export function useSubmissionVersions(
           const nextVersions: VersionsBySubmission = {};
 
           results.forEach((result, index) => {
-            const submissionId = submissions[index]?.id;
+            const submissionId = submissionIds[index];
             if (!submissionId) {
               return;
             }
@@ -62,7 +66,7 @@ export function useSubmissionVersions(
     return () => {
       cancelled = true;
     };
-  }, [submissions, onError]);
+  }, [submissionIdsKey, onError]);
 
   const versions = selectedSubmissionId ? versionsBySubmission[selectedSubmissionId] ?? [] : [];
   const versionCounts = submissions.reduce<Record<string, number>>((counts, submission) => {
@@ -70,10 +74,12 @@ export function useSubmissionVersions(
     return counts;
   }, {});
 
+  // 版本列表统一为「最新在前」，与 submission_list_versions 的 created_at DESC 一致；
+  // 新版本插入头部，避免与 DB 顺序混用导致 versions[0] 指向旧版本。
   const appendVersion = (version: PaperVersion) => {
     setVersionsBySubmission((currentVersions) => ({
       ...currentVersions,
-      [version.submissionId]: [...(currentVersions[version.submissionId] ?? []), version],
+      [version.submissionId]: [version, ...(currentVersions[version.submissionId] ?? [])],
     }));
   };
 

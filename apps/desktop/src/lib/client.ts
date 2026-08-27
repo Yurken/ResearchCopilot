@@ -966,10 +966,11 @@ export const submissionApi = {
 
   stats: () => invoke<{ active: number; pendingReviews: number; upcomingDdls: { name: string; deadline: string }[] }>("submission_stats"),
 
-  aiReview: (params: { submissionId: string; content: string; reviewerCount: number; strictness: string }) =>
+  aiReview: (params: { submissionId: string; content: string; reviewerCount: number; strictness: string; runId?: string }) =>
     invoke<void>("submission_ai_review", {
       submissionId: params.submissionId, content: params.content,
       reviewerCount: params.reviewerCount, strictness: params.strictness,
+      runId: params.runId ?? null,
     }),
   polishAbstract: (submissionId: string, text: string, requestId?: string) =>
     invoke<void>("submission_polish_abstract", { submissionId, text, requestId: requestId ?? null }),

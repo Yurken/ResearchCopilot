@@ -716,17 +716,24 @@ async fn init_default_checklist(
     pool: &sqlx::SqlitePool,
     submission_id: &str,
 ) -> Result<(), String> {
+    // 与前端 features/submission/shared.ts 的 DEFAULT_CHECKLIST 保持一致（15 条），
+    // 避免前后端两套默认清单导致分类、文案不一致。
     let defaults = vec![
-        ("摘要完整", "写作"),
-        ("图表标注清晰", "写作"),
-        ("参考文献格式统一", "写作"),
-        ("符合页数/字数限制", "格式"),
-        ("已按模板排版", "格式"),
-        ("已通过查重检测", "合规"),
-        ("作者信息正确", "合规"),
-        ("摘要已投稿系统", "提交"),
-        ("全文已上传", "提交"),
-        ("已收到投稿确认邮件", "提交"),
+        ("标题符合会议主题方向", "内容"),
+        ("摘要不超过字数限制", "内容"),
+        ("关键词已选择（3–5 个）", "内容"),
+        ("页面数量符合要求", "格式"),
+        ("字体与字号符合模板", "格式"),
+        ("页边距符合规定", "格式"),
+        ("图表清晰可读（≥ 300 DPI）", "格式"),
+        ("参考文献格式统一", "格式"),
+        ("作者顺序已确认", "提交"),
+        ("作者单位信息正确", "提交"),
+        ("利益冲突声明已填写（如需）", "提交"),
+        ("补充材料准备完毕（如需）", "提交"),
+        ("匿名化处理完成（双盲投稿）", "合规"),
+        ("自查重复率 < 15%", "合规"),
+        ("AI 使用声明（如需）", "合规"),
     ];
     for (i, (label, category)) in defaults.iter().enumerate() {
         let id = Uuid::new_v4().to_string();
@@ -750,7 +757,9 @@ pub async fn submission_get_checklist(
     state: State<'_, AppState>,
     submission_id: String,
 ) -> Result<serde_json::Value, String> {
-    let rows = sqlx::query(
+    // 历史投稿可能缺少种子清单：为空时先种子化再查询，
+    // 保证前端拿到的每条记录都有真实 id，勾选才能持久化。
+    let mut rows = sqlx::query(
         "SELECT id, submission_id, label, checked, category, sort_order
          FROM submission_checklist WHERE submission_id = ? ORDER BY sort_order",
     )
@@ -758,6 +767,18 @@ pub async fn submission_get_checklist(
     .fetch_all(&state.db)
     .await
     .map_err(|e| e.to_string())?;
+
+    if rows.is_empty() {
+        init_default_checklist(&state.db, &submission_id).await?;
+        rows = sqlx::query(
+            "SELECT id, submission_id, label, checked, category, sort_order
+             FROM submission_checklist WHERE submission_id = ? ORDER BY sort_order",
+        )
+        .bind(&submission_id)
+        .fetch_all(&state.db)
+        .await
+        .map_err(|e| e.to_string())?;
+    }
 
     let items: Vec<serde_json::Value> = rows
         .iter()
@@ -781,11 +802,18 @@ pub async fn submission_toggle_checklist(
     state: State<'_, AppState>,
     item_id: String,
 ) -> Result<(), String> {
-    sqlx::query("UPDATE submission_checklist SET checked = CASE WHEN checked = 1 THEN 0 ELSE 1 END WHERE id = ?")
-        .bind(&item_id)
-        .execute(&state.db)
-        .await
-        .map_err(|e| e.to_string())?;
+    // 对不存在的 id 静默 0 行生效会让前端乐观更新永不持久化，必须显式报错
+    let result = sqlx::query(
+        "UPDATE submission_checklist SET checked = CASE WHEN checked = 1 THEN 0 ELSE 1 END WHERE id = ?",
+    )
+    .bind(&item_id)
+    .execute(&state.db)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    if result.rows_affected() == 0 {
+        return Err("清单项不存在或已被删除，请刷新清单后重试".to_string());
+    }
     Ok(())
 }
 
@@ -900,6 +928,7 @@ pub async fn submission_ai_review(
     content: String,
     reviewer_count: u8,
     strictness: String,
+    run_id: Option<String>,
 ) -> Result<(), String> {
     let settings = state.settings.read().await.clone();
     let (client, is_scoped) = LlmClient::scoped_client_from_settings(
@@ -980,6 +1009,7 @@ pub async fn submission_ai_review(
                         "submission:ai_review:reviewer",
                         json!({
                             "submissionId": submission_id,
+                            "runId": run_id,
                             "index": i,
                             "reviewer": reviewer,
                             "focus": focus,
@@ -990,7 +1020,7 @@ pub async fn submission_ai_review(
                 Err(e) => {
                     let _ = app.emit(
                         "submission:ai_review:error",
-                        json!({ "submissionId": submission_id, "error": e.to_string() }),
+                        json!({ "submissionId": submission_id, "runId": run_id, "error": e.to_string() }),
                     );
                     return;
                 }
@@ -1000,7 +1030,7 @@ pub async fn submission_ai_review(
             save_ai_review_diagnosis_report(&db, &submission_id, &text, &diagnosis_reviews).await;
         let _ = app.emit(
             "submission:ai_review:done",
-            json!({ "submissionId": submission_id }),
+            json!({ "submissionId": submission_id, "runId": run_id }),
         );
     });
 

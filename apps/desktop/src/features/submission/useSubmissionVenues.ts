@@ -42,28 +42,20 @@ export function useSubmissionVenues(onError?: (error: unknown) => void) {
   const [interests, setInterests] = useState<ResearchInterest[]>([]);
   const [recInterestId, setRecInterestId] = useState("");
 
-  useEffect(() => {
-    let cancelled = false;
-
-    submissionApi
-      .listVenues()
-      .then((response) => {
-        if (cancelled) {
-          return;
-        }
-
-        const venues = response.venues.map(rowToVenue);
-        setConferences(venues.filter((venue): venue is Conference => venue.type === "conference"));
-        setJournals(venues.filter((venue): venue is Journal => venue.type === "journal"));
-      })
-      .catch((error) => {
-        onError?.(error);
-      });
-
-    return () => {
-      cancelled = true;
-    };
+  const reloadVenues = useCallback(async () => {
+    try {
+      const response = await submissionApi.listVenues();
+      const venues = response.venues.map(rowToVenue);
+      setConferences(venues.filter((venue): venue is Conference => venue.type === "conference"));
+      setJournals(venues.filter((venue): venue is Journal => venue.type === "journal"));
+    } catch (error) {
+      onError?.(error);
+    }
   }, [onError]);
+
+  useEffect(() => {
+    void reloadVenues();
+  }, [reloadVenues]);
 
   useEffect(() => {
     let cancelled = false;
@@ -257,8 +249,7 @@ export function useSubmissionVenues(onError?: (error: unknown) => void) {
       onError?.(error);
       return;
     }
-
-    setShowAddModal(false);
+    // 添加成功后不关闭弹窗：列表会通过 isVenueAdded 显示「已添加」，方便连续添加多个刊物
   }, [onError]);
 
   const isVenueAdded = useCallback(
@@ -302,6 +293,7 @@ export function useSubmissionVenues(onError?: (error: unknown) => void) {
     toggleVenueStar,
     handleAddVenue,
     isVenueAdded,
+    reloadVenues,
     generateRecommendations,
     recommendFromInterest,
   };
