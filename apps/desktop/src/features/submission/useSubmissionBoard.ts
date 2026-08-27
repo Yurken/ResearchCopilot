@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { submissionApi } from "../../lib/client";
 import {
   KANBAN_COLS,
+  formatLocalDate,
+  parseLocalDate,
   rowToSubmission,
   type AddSubmissionFormState,
   type Submission,
@@ -65,7 +67,7 @@ export function useSubmissionBoard(onError?: (error: unknown) => void) {
     submissionApi
       .update(id, {
         status,
-        submittedAt: submittedAt?.toISOString().slice(0, 10),
+        submittedAt: submittedAt ? formatLocalDate(submittedAt) : undefined,
       })
       .catch((error) => {
         setSubmissions((currentSubmissions) =>
@@ -79,6 +81,7 @@ export function useSubmissionBoard(onError?: (error: unknown) => void) {
 
   const handleAddSubmission = async () => {
     if (!addSubForm.title.trim() || !addSubForm.venue.trim()) {
+      onError?.(new Error("请填写论文标题和目标期刊/会议"));
       return;
     }
 
@@ -99,7 +102,7 @@ export function useSubmissionBoard(onError?: (error: unknown) => void) {
           venue: addSubForm.venue.trim(),
           venueType: addSubForm.venueType,
           status: "writing",
-          deadline: addSubForm.deadline ? new Date(addSubForm.deadline) : undefined,
+          deadline: addSubForm.deadline ? parseLocalDate(addSubForm.deadline) : undefined,
         },
       ]);
       setShowAddSubModal(false);

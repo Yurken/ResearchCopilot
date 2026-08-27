@@ -73,8 +73,11 @@ export function useSubmissionChecklist(submissions: Submission[], onError?: (err
     if (checklistSubId) {
       submissionApi.toggleChecklist(id).catch((error) => {
         onError?.(error);
+        // 仅当当前值仍是本次乐观值时才回滚，避免覆盖后续成功操作的结果
         setChecklist((currentChecklist) =>
-          currentChecklist.map((entry) => (entry.id === id ? { ...entry, checked: item.checked } : entry))
+          currentChecklist.map((entry) =>
+            entry.id === id && entry.checked === !item.checked ? { ...entry, checked: item.checked } : entry
+          )
         );
       });
     }
@@ -90,9 +93,10 @@ export function useSubmissionChecklist(submissions: Submission[], onError?: (err
 
     Promise.all(checkedItems.map((item) => submissionApi.toggleChecklist(item.id))).catch((error) => {
       onError?.(error);
+      // 仅回滚仍处于重置后未勾选状态的项，避免覆盖用户在请求期间的新操作
       setChecklist((currentChecklist) =>
         currentChecklist.map((item) =>
-          checkedItems.some((checkedItem) => checkedItem.id === item.id)
+          !item.checked && checkedItems.some((checkedItem) => checkedItem.id === item.id)
             ? { ...item, checked: true }
             : item
         )

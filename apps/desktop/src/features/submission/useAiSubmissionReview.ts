@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { papersApi, submissionApi } from "../../lib/client";
 import { safeListen } from "../../lib/tauriEvent";
-import { countVerdicts, getDominantVerdict, type MockReviewInput, type MockReviewerResult, type ReviewFeedbackStatus, type ReviewVerdict } from "./shared";
+import { countVerdicts, getDominantVerdict, rowToRound, type MockReviewInput, type MockReviewerResult, type ReviewFeedbackStatus, type ReviewVerdict } from "./shared";
 
 interface UseAiSubmissionReviewOptions {
   onError: (error: unknown) => void;
@@ -10,6 +10,7 @@ interface UseAiSubmissionReviewOptions {
 
 export interface AiReviewEvent {
   submissionId: string;
+  runId?: string;
   index: number;
   reviewer: string;
   focus: string;
@@ -75,18 +76,20 @@ export function useAiSubmissionReview({ onError, onDiagnosisSaved }: UseAiSubmis
     let unlistenDone: (() => void) | undefined;
     let unlistenError: (() => void) | undefined;
     let mounted = true;
+    // 事件按 runId 过滤（后端随事件回传）：隔离同一投稿并发/连续的两次预审，
+    // 避免两轮 reviewer 事件交叉混入同一结果缓冲。
     safeListen<AiReviewEvent>("submission:ai_review:reviewer", ({ payload }) => {
-      if (payload.submissionId !== activeSubmissionRef.current) return;
+      if (payload.runId !== reviewRunIdRef.current) return;
       resultBufferRef.current = [...resultBufferRef.current, toReviewerResult(payload)];
       setResults([...resultBufferRef.current]);
     }).then((unlisten) => { if (!mounted) unlisten(); else unlistenReviewer = unlisten; });
-    safeListen<{ submissionId: string }>("submission:ai_review:done", ({ payload }) => {
-      if (payload.submissionId !== activeSubmissionRef.current) return;
+    safeListen<{ submissionId: string; runId?: string }>("submission:ai_review:done", ({ payload }) => {
+      if (payload.runId !== reviewRunIdRef.current) return;
       setLoading(false);
       onDiagnosisSavedRef.current(payload.submissionId);
     }).then((unlisten) => { if (!mounted) unlisten(); else unlistenDone = unlisten; });
-    safeListen<{ submissionId: string; error: string }>("submission:ai_review:error", ({ payload }) => {
-      if (payload.submissionId !== activeSubmissionRef.current) return;
+    safeListen<{ submissionId: string; runId?: string; error: string }>("submission:ai_review:error", ({ payload }) => {
+      if (payload.runId !== reviewRunIdRef.current) return;
       setLoading(false);
       onErrorRef.current(payload.error);
     }).then((unlisten) => { if (!mounted) unlisten(); else unlistenError = unlisten; });
@@ -104,7 +107,9 @@ export function useAiSubmissionReview({ onError, onDiagnosisSaved }: UseAiSubmis
     setFeedback({});
   }, []);
 
-  const openForSubmission = useCallback((submissionId: string, content: string) => {
+  // filePath 存在时从 PDF 提取全文作为审稿输入（与按钮提示一致）；
+  // 提取完成前若已切换到其他投稿，丢弃迟到的结果，避免覆盖新输入。
+  const openForSubmission = useCallback((submissionId: string, content: string, filePath?: string) => {
     activeSubmissionRef.current = submissionId;
     setInput((current) => ({ ...current, abstract: content }));
     setFileName(null);
@@ -114,6 +119,19 @@ export function useAiSubmissionReview({ onError, onDiagnosisSaved }: UseAiSubmis
     void submissionApi.reviewFeedbackSummary(submissionId)
       .then((summary) => setFeedbackSummary(summary.counts))
       .catch(() => setFeedbackSummary({ pending: 0, adopted: 0, ignored: 0, done: 0 }));
+    if (filePath) {
+      setFileExtracting(true);
+      papersApi.extractPdfText(filePath, 8000)
+        .then((text) => {
+          if (activeSubmissionRef.current !== submissionId) return;
+          setInput((current) => ({ ...current, abstract: text.slice(0, 5000) }));
+          setFileName(filePath.split("/").pop() ?? null);
+        })
+        .catch((error) => {
+          if (activeSubmissionRef.current === submissionId) onErrorRef.current(error);
+        })
+        .finally(() => setFileExtracting(false));
+    }
   }, [reset]);
 
   const close = useCallback(() => {
@@ -140,7 +158,7 @@ export function useAiSubmissionReview({ onError, onDiagnosisSaved }: UseAiSubmis
 
   const generate = useCallback(() => {
     const submissionId = activeSubmissionRef.current;
-    if (!submissionId || !input.abstract.trim()) return;
+    if (!submissionId || !input.abstract.trim() || loading) return;
     reset();
     reviewRunIdRef.current = `${submissionId}:${Date.now()}`;
     setLoading(true);
@@ -149,11 +167,12 @@ export function useAiSubmissionReview({ onError, onDiagnosisSaved }: UseAiSubmis
       content: input.abstract,
       reviewerCount: input.reviewerCount,
       strictness: input.strictness,
+      runId: reviewRunIdRef.current,
     }).catch((error) => {
       setLoading(false);
       onErrorRef.current(error);
     });
-  }, [input, reset]);
+  }, [input, loading, reset]);
 
   const saveFeedback = useCallback(async (
     result: MockReviewerResult,
@@ -188,26 +207,33 @@ export function useAiSubmissionReview({ onError, onDiagnosisSaved }: UseAiSubmis
     }
   }, []);
 
-  const importResults = useCallback(async (round: number) => {
+  // 导入时写入新轮次（既有最大轮次 + 1）：不再覆盖 reviews 页当前选中轮次的 verdict，
+  // 重复导入也不会在同一轮产生重复评论。
+  const importResults = useCallback(async () => {
     const submissionId = activeSubmissionRef.current;
     const currentResults = results ?? [];
     if (!submissionId || currentResults.length === 0) return null;
     try {
+      const roundsResponse = await submissionApi.listRounds(submissionId);
+      const nextRound =
+        roundsResponse.rounds
+          .map(rowToRound)
+          .reduce((max, existing) => Math.max(max, existing.round), 0) + 1;
       await submissionApi.upsertRound({
         submissionId,
-        round,
+        round: nextRound,
         verdict: getDominantVerdict(countVerdicts(currentResults)),
       });
       await Promise.all(currentResults.map((result) => submissionApi.createComment({
         submissionId,
-        round,
+        round: nextRound,
         reviewer: result.reviewer,
         content: result.content,
         tags: result.tags,
       })));
       const summary = await submissionApi.reviewFeedbackSummary(submissionId);
       close();
-      return { submissionId, count: currentResults.length, feedbackSummary: summary.counts };
+      return { submissionId, round: nextRound, count: currentResults.length, feedbackSummary: summary.counts };
     } catch (error) {
       onErrorRef.current(error);
       return null;
