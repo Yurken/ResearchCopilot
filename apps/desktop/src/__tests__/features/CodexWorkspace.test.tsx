@@ -49,7 +49,7 @@ describe("CodexWorkspace", () => {
 
     expect(await screen.findByRole("heading", { name: "启动 Codex" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Codex Harness" })).toBeInTheDocument();
-    expect(screen.getByText("本机 Codex")).toBeInTheDocument();
+    expect(screen.getByText("已安装 Codex")).toBeInTheDocument();
     expect(screen.queryByText("小妍代码")).not.toBeInTheDocument();
     expect(screen.queryByText("DeepSeek Harness")).not.toBeInTheDocument();
   });
@@ -57,9 +57,9 @@ describe("CodexWorkspace", () => {
   it("passes an external executable through the runtime controller", async () => {
     const user = userEvent.setup();
     render(<CodexWorkspace />);
-    await screen.findByText("本机 Codex");
+    await screen.findByText("已安装 Codex");
 
-    await user.click(screen.getByRole("button", { name: /外部 Codex/ }));
+    await user.click(screen.getByRole("button", { name: /自定义 Codex/ }));
     await user.type(screen.getByLabelText("codex 可执行文件"), "/usr/local/bin/codex");
     await user.click(screen.getByRole("button", { name: "启动 Codex" }));
 
@@ -89,7 +89,7 @@ describe("CodexWorkspace", () => {
   it("configures the current Xiaoyan API without exposing its credential", async () => {
     const user = userEvent.setup();
     render(<CodexWorkspace />);
-    await screen.findByText("本机 Codex");
+    await screen.findByText("已安装 Codex");
 
     await user.click(screen.getByRole("button", { name: "配置小妍 API" }));
 

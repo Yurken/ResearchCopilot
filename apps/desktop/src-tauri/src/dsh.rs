@@ -253,10 +253,10 @@ fn validate_config(config: &DshRuntimeConfig) -> Result<(), String> {
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .ok_or_else(|| "请先选择外部 dsh 可执行文件".to_string())?;
+            .ok_or_else(|| "请先选择自定义 dsh 可执行文件".to_string())?;
         let path = Path::new(executable);
         if path.components().count() > 1 && !path.is_file() {
-            return Err("外部 dsh 可执行文件不存在".to_string());
+            return Err("自定义 dsh 可执行文件不存在".to_string());
         }
     }
     Ok(())
@@ -428,7 +428,7 @@ pub async fn dsh_runtime_start(
             "[xiaoyan] 正在启动 {} profile={} workspace={}",
             match config.mode {
                 DshRuntimeMode::Bundled => "内置 DSH",
-                DshRuntimeMode::External => "外部 DSH",
+                DshRuntimeMode::External => "自定义 DSH",
             },
             config.profile,
             workspace.display()
@@ -483,26 +483,26 @@ pub async fn dsh_runtime_stop(
 pub async fn dsh_runtime_validate_external(executable: String) -> Result<String, String> {
     let executable = executable.trim();
     if executable.is_empty() {
-        return Err("请先选择外部 dsh 可执行文件".to_string());
+        return Err("请先选择自定义 dsh 可执行文件".to_string());
     }
     let output = timeout(
         Duration::from_secs(8),
         Command::new(executable).arg("--version").output(),
     )
     .await
-    .map_err(|_| "外部 DSH 版本检查超时".to_string())?
-    .map_err(|error| format!("无法执行外部 DSH：{error}"))?;
+    .map_err(|_| "自定义 DSH 版本检查超时".to_string())?
+    .map_err(|error| format!("无法执行自定义 DSH：{error}"))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if stderr.is_empty() {
-            format!("外部 DSH 版本检查失败（{}）", output.status)
+            format!("自定义 DSH 版本检查失败（{}）", output.status)
         } else {
             stderr
         });
     }
     let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if version.is_empty() {
-        return Err("外部 DSH 未返回版本号".to_string());
+        return Err("自定义 DSH 未返回版本号".to_string());
     }
     Ok(version)
 }

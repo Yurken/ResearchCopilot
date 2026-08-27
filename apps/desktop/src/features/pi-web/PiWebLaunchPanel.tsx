@@ -71,7 +71,7 @@ export default function PiWebLaunchPanel({
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-6 py-8">
-      <div className="mx-auto max-w-3xl">
+      <div className="mx-auto max-w-4xl">
         <div className="mb-5">
           <h2 className="text-xl font-semibold tracking-[-0.02em] text-ink-primary">启动 Pi Web</h2>
           <p className="mt-1.5 text-sm text-ink-tertiary">直接嵌入 agegr/pi-web 的完整工作台、会话、模型、技能和文件预览。</p>
@@ -80,8 +80,8 @@ export default function PiWebLaunchPanel({
           <h3 className="text-sm font-semibold text-ink-primary">运行环境</h3>
           <p className="mt-1 text-xs leading-5 text-ink-tertiary">小妍分配随机 loopback 端口并禁止自动打开外部浏览器。Pi Web 仍以当前用户权限执行。</p>
           <div className="mt-4 grid gap-1 rounded-[22px] p-1 sm:grid-cols-2" style={{ background: "var(--rc-chip-inset-bg)", boxShadow: "var(--rc-chip-inset-shadow)" }}>
-            <ModeOption mode="path" active={draft.mode === "path"} title="本机 Pi Web" description="使用 npm 全局安装或 PATH 中的版本" onSelect={(mode) => onDraftChange("mode", mode)} />
-            <ModeOption mode="external" active={draft.mode === "external"} title="外部 Pi Web" description="指定自行维护的可执行文件" onSelect={(mode) => onDraftChange("mode", mode)} />
+            <ModeOption mode="path" active={draft.mode === "path"} title="已安装 Pi Web" description="自动发现 npm 全局安装或 PATH 中的版本" onSelect={(mode) => onDraftChange("mode", mode)} />
+            <ModeOption mode="external" active={draft.mode === "external"} title="自定义 Pi Web" description="手动指定自行维护的可执行文件" onSelect={(mode) => onDraftChange("mode", mode)} />
           </div>
 
           {draft.mode === "path" && !runtime.snapshot?.pathAvailable ? (
@@ -106,11 +106,11 @@ export default function PiWebLaunchPanel({
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <label className="text-xs font-medium text-ink-secondary" htmlFor="pi-web-workspace">默认工作目录</label>
-              <div className="flex gap-2"><Input id="pi-web-workspace" value={draft.workspaceDir ?? ""} onChange={(event) => onDraftChange("workspaceDir", event.target.value || null)} placeholder="未选择时使用小妍隔离目录" className="min-w-0 flex-1" /><Button variant="secondary" onClick={() => void pickDirectory("workspaceDir", "选择 Pi Web 工作目录")}>选择</Button></div>
+              <div className="flex gap-2"><Input id="pi-web-workspace" value={draft.workspaceDir ?? ""} onChange={(event) => onDraftChange("workspaceDir", event.target.value || null)} placeholder="未选择时使用小妍隔离目录" className="min-w-0 flex-1" /><Button variant="secondary" className="flex-shrink-0 whitespace-nowrap" onClick={() => void pickDirectory("workspaceDir", "选择 Pi Web 工作目录")}>选择</Button></div>
             </div>
             <div className="space-y-2">
               <label className="text-xs font-medium text-ink-secondary" htmlFor="pi-web-agent-dir">Pi 数据目录</label>
-              <div className="flex gap-2"><Input id="pi-web-agent-dir" value={draft.agentDir ?? ""} onChange={(event) => onDraftChange("agentDir", event.target.value || null)} placeholder={runtime.snapshot?.dataHome ?? "默认使用 ~/.pi/agent"} className="min-w-0 flex-1" /><Button variant="secondary" onClick={() => void pickDirectory("agentDir", "选择 Pi 数据目录")}>选择</Button></div>
+              <div className="flex gap-2"><Input id="pi-web-agent-dir" value={draft.agentDir ?? ""} onChange={(event) => onDraftChange("agentDir", event.target.value || null)} placeholder={runtime.snapshot?.dataHome ?? "默认使用 ~/.pi/agent"} className="min-w-0 flex-1" /><Button variant="secondary" className="flex-shrink-0 whitespace-nowrap" onClick={() => void pickDirectory("agentDir", "选择 Pi 数据目录")}>选择</Button></div>
             </div>
           </div>
 

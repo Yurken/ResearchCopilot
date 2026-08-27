@@ -91,7 +91,7 @@ export default function CodexLaunchPanel({
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-6 py-8">
-      <div className="mx-auto max-w-3xl">
+      <div className="mx-auto max-w-4xl">
         <div className="mb-5">
           <h2 className="text-xl font-semibold tracking-[-0.02em] text-ink-primary">启动 Codex</h2>
           <p className="mt-1.5 text-sm text-ink-tertiary">选择运行环境和工作目录，然后进入小妍 Codex Web。</p>
@@ -107,15 +107,15 @@ export default function CodexLaunchPanel({
             <RuntimeModeOption
               mode="path"
               active={draft.mode === "path"}
-              title="本机 Codex"
-              description="使用当前环境中的官方 harness"
+              title="已安装 Codex"
+              description="自动发现环境中已安装的官方 harness"
               onSelect={(mode) => onDraftChange("mode", mode)}
             />
             <RuntimeModeOption
               mode="external"
               active={draft.mode === "external"}
-              title="外部 Codex"
-              description="使用本机自行维护的版本"
+              title="自定义 Codex"
+              description="手动指定自行维护的可执行文件"
               onSelect={(mode) => onDraftChange("mode", mode)}
             />
           </div>
@@ -123,7 +123,7 @@ export default function CodexLaunchPanel({
           {draft.mode === "path" && !runtime.snapshot?.pathAvailable && (
             <div className="mt-4 flex gap-2.5 rounded-2xl border border-amber-700/15 bg-amber-50/60 px-3.5 py-3 text-amber-900">
               <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
-              <p className="text-xs leading-5">未找到官方 Codex Harness。可执行 `brew install --cask codex` 或 `npm i -g @openai/codex`，或改为选择外部可执行文件。</p>
+              <p className="text-xs leading-5">未找到官方 Codex Harness。可执行 `brew install --cask codex` 或 `npm i -g @openai/codex`，或改为自定义可执行文件。</p>
             </div>
           )}
 

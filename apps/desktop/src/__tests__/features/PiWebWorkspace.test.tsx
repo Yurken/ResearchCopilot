@@ -34,8 +34,8 @@ describe("PiWebWorkspace", () => {
   it("starts an externally selected Pi Web runtime", async () => {
     const user = userEvent.setup();
     render(<PiWebWorkspace />);
-    await screen.findByText("本机 Pi Web");
-    await user.click(screen.getByRole("button", { name: /外部 Pi Web/ }));
+    await screen.findByText("已安装 Pi Web");
+    await user.click(screen.getByRole("button", { name: /自定义 Pi Web/ }));
     await user.type(screen.getByLabelText("pi-web 可执行文件"), "/usr/local/bin/pi-web");
     await user.click(screen.getByRole("button", { name: "启动 Pi Web" }));
     await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("pi_web_runtime_configure", {

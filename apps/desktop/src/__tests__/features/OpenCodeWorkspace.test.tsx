@@ -24,8 +24,8 @@ describe("OpenCodeWorkspace", () => {
   });
 
   it("starts an externally selected runtime", async () => {
-    const user = userEvent.setup(); render(<OpenCodeWorkspace />); await screen.findByText("本机 OpenCode");
-    await user.click(screen.getByRole("button", { name: /外部 OpenCode/ }));
+    const user = userEvent.setup(); render(<OpenCodeWorkspace />); await screen.findByText("已安装 OpenCode");
+    await user.click(screen.getByRole("button", { name: /自定义 OpenCode/ }));
     await user.type(screen.getByLabelText("opencode 可执行文件"), "/usr/local/bin/opencode");
     await user.click(screen.getByRole("button", { name: "启动 OpenCode" }));
     await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("opencode_runtime_configure", { config: expect.objectContaining({ mode: "external", externalExecutable: "/usr/local/bin/opencode" }) }));
