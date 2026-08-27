@@ -183,7 +183,21 @@ export function CopilotChatArea(props: CopilotChatAreaProps) {
                   </div>
                 )}
                 <CopilotSourceLinks sources={message.sources} />
-                {parsed.answer && (
+                {(message.status === "interrupted" || message.status === "failed") &&
+                  !(sending && isActiveAssistant) && (
+                  <div
+                    className="mt-1 inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-[11px]"
+                    style={
+                      message.status === "failed"
+                        ? { color: "#FF3B30", background: "rgba(255,59,48,0.08)" }
+                        : { color: "var(--rc-text-tertiary)", background: "var(--rc-surface)" }
+                    }
+                    role="status"
+                  >
+                    {message.status === "failed" ? "生成失败，可点击重试" : "已停止，回答可能不完整"}
+                  </div>
+                )}
+                {(parsed.answer || message.status === "failed" || message.status === "interrupted") && (
                   <div className="flex items-center gap-0.5 mt-1">
                     <button type="button" onClick={() => onCopy(parsed.answer, message.id)}
                       className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] transition-colors hover:bg-nm-dark/8"
