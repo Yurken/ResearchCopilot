@@ -676,10 +676,243 @@ pub fn build_survey_markdown(
     out
 }
 
+// ── 运行互斥（B3）──────────────────────────────────────────────
+
+static SURVEY_RUN_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// 同一时刻只允许一个综述生成任务；已在运行时返回 None。
+pub fn try_acquire_survey_run_lock() -> Option<tokio::sync::MutexGuard<'static, ()>> {
+    SURVEY_RUN_LOCK.try_lock().ok()
+}
+
+// ── 写作结果验收（B4）──────────────────────────────────────────
+
+/// 写作 Agent 输出验收：必须是对象且至少包含一个正文章节字段，
+/// 防止空 JSON / 非 JSON 输出被当作成功结果落库。
+pub fn is_usable_survey_report(report: &Value) -> bool {
+    let Some(obj) = report.as_object() else {
+        return false;
+    };
+    if obj.is_empty() {
+        return false;
+    }
+    const PARAGRAPH_FIELDS: [&str; 3] = ["background", "topic_landscape", "overall_summary"];
+    let has_paragraph = PARAGRAPH_FIELDS.iter().any(|key| {
+        report
+            .get(*key)
+            .and_then(|v| v.as_str())
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false)
+    });
+    if has_paragraph {
+        return true;
+    }
+    const LIST_FIELDS: [&str; 4] = ["major_methods", "research_trends", "challenges", "research_gaps"];
+    LIST_FIELDS.iter().any(|key| {
+        report
+            .get(*key)
+            .and_then(|v| v.as_array())
+            .map(|arr| !arr.is_empty())
+            .unwrap_or(false)
+    })
+}
+
+// ── 文献类型/数据库偏好加权（B7）─────────────────────────────────
+
+/// 现有数据结构对偏好的支撑有限：本地论文库没有来源数据库字段，
+/// 只能基于可识别信号（ccf_type、arXiv 预印本、IEEE/ACM/PubMed 链接）做加权排序。
+/// 返回 0 表示无法识别该论文是否匹配偏好。
+pub fn survey_preference_score(paper: &Value, lit_types: &[String], databases: &[String]) -> i64 {
+    let venue = paper.get("venue").and_then(|v| v.as_str()).unwrap_or("");
+    let url = paper.get("paper_url").and_then(|v| v.as_str()).unwrap_or("");
+    let haystack = format!("{} {}", venue, url).to_lowercase();
+    let ccf_type = paper.get("ccf_type").and_then(|v| v.as_str()).unwrap_or("");
+    let is_preprint = haystack.contains("arxiv");
+
+    let mut score = 0i64;
+    for lit_type in lit_types {
+        let hit = match lit_type.as_str() {
+            "期刊论文" => ccf_type == "journal",
+            "会议论文" => ccf_type == "conference",
+            "预印本" => is_preprint,
+            // 学位论文/专著无法从现有字段识别，不加权。
+            _ => false,
+        };
+        if hit {
+            score += 2;
+        }
+    }
+    for database in databases {
+        let hit = match database.as_str() {
+            "arXiv" => is_preprint,
+            "IEEE Xplore" => haystack.contains("ieee"),
+            "ACM DL" => haystack.contains("acm"),
+            "PubMed" => haystack.contains("pubmed") || haystack.contains("ncbi"),
+            // CNKI/万方/Web of Science/Scopus 无法从现有字段识别，不加权。
+            _ => false,
+        };
+        if hit {
+            score += 1;
+        }
+    }
+    score
+}
+
+/// 按偏好对候选文献做稳定加权排序（匹配者优先，不改变相对顺序）。
+pub fn apply_survey_preferences(papers: &mut [Value], lit_types: &[String], databases: &[String]) {
+    if papers.is_empty() || (lit_types.is_empty() && databases.is_empty()) {
+        return;
+    }
+    papers.sort_by_key(|paper| std::cmp::Reverse(survey_preference_score(paper, lit_types, databases)));
+}
+
+// ── 落库（B5）──────────────────────────────────────────────────
+
+/// 综述结果持久化入库；失败时返回错误，由调用方决定如何提示用户。
+#[allow(clippy::too_many_arguments)]
+pub async fn insert_survey(
+    db: &sqlx::SqlitePool,
+    survey_id: &str,
+    query: &str,
+    report: &Value,
+    papers: &[Value],
+    formatted_citations: &[String],
+    cite_format: &str,
+    language: &str,
+    survey_meta: &Value,
+    markdown: &str,
+) -> Result<(), String> {
+    sqlx::query(
+        "INSERT INTO surveys \
+         (id, query, report_json, papers_json, citations_json, citation_format, language, meta_json, markdown) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(survey_id)
+    .bind(query)
+    .bind(serde_json::to_string(report).unwrap_or_else(|_| "{}".into()))
+    .bind(serde_json::to_string(papers).unwrap_or_else(|_| "[]".into()))
+    .bind(serde_json::to_string(formatted_citations).unwrap_or_else(|_| "[]".into()))
+    .bind(cite_format)
+    .bind(language)
+    .bind(serde_json::to_string(survey_meta).unwrap_or_else(|_| "{}".into()))
+    .bind(markdown)
+    .execute(db)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{build_formatted_citations, build_survey_markdown};
+    use super::{
+        apply_survey_preferences, build_formatted_citations, build_survey_markdown, insert_survey,
+        is_usable_survey_report, survey_preference_score, try_acquire_survey_run_lock,
+    };
     use serde_json::json;
+
+    #[test]
+    fn survey_run_lock_allows_single_run() {
+        let first = try_acquire_survey_run_lock();
+        assert!(first.is_some());
+        assert!(try_acquire_survey_run_lock().is_none());
+        drop(first);
+        assert!(try_acquire_survey_run_lock().is_some());
+    }
+
+    #[test]
+    fn usable_report_requires_content_sections() {
+        assert!(!is_usable_survey_report(&json!({})));
+        assert!(!is_usable_survey_report(&json!([])));
+        assert!(!is_usable_survey_report(&json!("not json object")));
+        assert!(!is_usable_survey_report(&json!({ "background": "  " })));
+        assert!(is_usable_survey_report(&json!({ "background": "研究背景内容" })));
+        assert!(is_usable_survey_report(&json!({ "major_methods": [{ "name": "方法A" }] })));
+    }
+
+    #[test]
+    fn preference_score_boosts_recognizable_matches() {
+        let journal = json!({ "title": "A", "venue": "NeurIPS", "ccf_type": "journal" });
+        let preprint = json!({ "title": "B", "venue": "arXiv preprint", "paper_url": "https://arxiv.org/abs/1" });
+        let unknown = json!({ "title": "C", "venue": "Some Workshop" });
+
+        let lit = vec!["期刊论文".to_string(), "预印本".to_string()];
+        assert!(survey_preference_score(&journal, &lit, &[]) > 0);
+        assert!(survey_preference_score(&preprint, &lit, &[]) > 0);
+        assert_eq!(survey_preference_score(&unknown, &lit, &[]), 0);
+
+        let dbs = vec!["arXiv".to_string(), "CNKI".to_string()];
+        assert!(survey_preference_score(&preprint, &[], &dbs) > 0);
+        // CNKI 无法识别，不给 unknown 加权
+        assert_eq!(survey_preference_score(&unknown, &[], &dbs), 0);
+    }
+
+    #[test]
+    fn apply_preferences_keeps_stable_order_within_same_score() {
+        let mut papers = vec![
+            json!({ "title": "plain-1" }),
+            json!({ "title": "journal-1", "ccf_type": "journal" }),
+            json!({ "title": "plain-2" }),
+        ];
+        let lit = vec!["期刊论文".to_string()];
+        apply_survey_preferences(&mut papers, &lit, &[]);
+        let titles: Vec<&str> = papers
+            .iter()
+            .map(|p| p.get("title").and_then(|v| v.as_str()).unwrap_or(""))
+            .collect();
+        assert_eq!(titles, vec!["journal-1", "plain-1", "plain-2"]);
+    }
+
+    #[tokio::test]
+    async fn insert_survey_roundtrip_and_failure() {
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        // 未建表时落库必须失败（B5：不再静默吞错）
+        let err = insert_survey(
+            &pool,
+            "s1",
+            "q",
+            &json!({ "background": "b" }),
+            &[],
+            &[],
+            "gbt7714",
+            "both",
+            &json!({}),
+            "# md",
+        )
+        .await;
+        assert!(err.is_err());
+
+        sqlx::query(
+            "CREATE TABLE surveys (
+                id TEXT PRIMARY KEY,
+                query TEXT NOT NULL,
+                report_json TEXT NOT NULL DEFAULT '{}',
+                papers_json TEXT NOT NULL DEFAULT '[]',
+                citations_json TEXT NOT NULL DEFAULT '[]',
+                citation_format TEXT,
+                language TEXT,
+                meta_json TEXT NOT NULL DEFAULT '{}',
+                markdown TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        insert_survey(
+            &pool,
+            "s1",
+            "q",
+            &json!({ "background": "b" }),
+            &[],
+            &[],
+            "gbt7714",
+            "both",
+            &json!({}),
+            "# md",
+        )
+        .await
+        .unwrap();
+    }
 
     #[test]
     fn build_formatted_citations_deduplicates_duplicate_entries() {

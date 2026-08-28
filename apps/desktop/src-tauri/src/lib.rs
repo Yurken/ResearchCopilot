@@ -14,6 +14,10 @@ mod assistant_prompts;
 mod ccf;
 mod citation_graph;
 mod code;
+mod codex;
+mod codex_api_config;
+mod codex_process;
+mod codex_web;
 mod commands;
 mod db;
 mod dsh;
@@ -24,6 +28,10 @@ mod graph_rag;
 mod journal_partitions;
 mod links;
 mod llm;
+mod opencode;
+mod opencode_process;
+mod pi_web;
+mod pi_web_process;
 mod rag;
 mod repositories;
 mod semantic_scholar;
@@ -57,7 +65,8 @@ use commands::{
     ccf::{ccf_list, ccf_lookup},
     chat::{
         chat_cancel, chat_delete_session, chat_ensure_session, chat_get_session,
-        chat_list_agent_runs, chat_list_sessions, chat_save_message, chat_stream,
+        chat_list_agent_runs, chat_list_sessions, chat_rename_session, chat_save_message,
+        chat_set_session_pinned, chat_stream, chat_truncate_session,
         chat_update_session_context,
     },
     citation_graph::{
@@ -118,8 +127,8 @@ use commands::{
         memory_privacy_verify_password,
     },
     misc::{
-        markdown_format_chunk, planner_generate, survey_delete, survey_generate, survey_get,
-        survey_list, survey_search,
+        markdown_format_chunk, survey_delete, survey_generate, survey_get, survey_list,
+        survey_search,
     },
     paper_corpus::{
         paper_corpus_create, paper_corpus_delete, paper_corpus_list, paper_corpus_update,
@@ -173,6 +182,14 @@ use commands::{
     writing::{
         writing_compile_pdf, writing_copy_pdf, writing_import_image, writing_open_compiled_pdf,
         writing_open_mactex_download_page, writing_open_mactex_installer,
+    },
+    writing_drafts::{
+        writing_draft_create, writing_draft_delete, writing_draft_get, writing_draft_list,
+        writing_draft_update,
+    },
+    writing_versions::{
+        writing_clear_draft_versions, writing_delete_version, writing_get_version,
+        writing_list_versions, writing_record_version,
     },
 };
 use state::{default_settings, AppState};
@@ -333,6 +350,18 @@ pub fn run() {
                 .expect("failed to get app data dir");
 
             app.manage(dsh::DshRuntimeState::new(app_data_dir.clone()));
+            app.manage(codex::CodexRuntimeState::new(
+                app_data_dir.clone(),
+                app.path().resource_dir().ok(),
+            ));
+            app.manage(opencode::OpenCodeRuntimeState::new(
+                app_data_dir.clone(),
+                app.path().resource_dir().ok(),
+            ));
+            app.manage(pi_web::PiWebRuntimeState::new(
+                app_data_dir.clone(),
+                app.path().resource_dir().ok(),
+            ));
 
             configure_diagnostic_log_path(&app_data_dir);
             append_diagnostic_log(&format!(
@@ -520,6 +549,25 @@ pub fn run() {
             dsh::dsh_runtime_stop,
             dsh::dsh_runtime_validate_external,
             dsh::dsh_runtime_import_xiaoyan_api,
+            // OpenAI Codex runtime
+            codex::codex_runtime_status,
+            codex::codex_runtime_configure,
+            codex::codex_runtime_start,
+            codex::codex_runtime_stop,
+            codex::codex_runtime_validate_external,
+            codex::codex_runtime_import_xiaoyan_api,
+            // OpenCode official web runtime
+            opencode::opencode_runtime_status,
+            opencode::opencode_runtime_configure,
+            opencode::opencode_runtime_start,
+            opencode::opencode_runtime_stop,
+            opencode::opencode_runtime_validate_external,
+            // Pi runtime
+            pi_web::pi_web_runtime_status,
+            pi_web::pi_web_runtime_configure,
+            pi_web::pi_web_runtime_start,
+            pi_web::pi_web_runtime_stop,
+            pi_web::pi_web_runtime_validate_external,
             // Papers
             papers_list,
             papers_get,
@@ -608,6 +656,9 @@ pub fn run() {
             chat_list_agent_runs,
             chat_stream,
             chat_cancel,
+            chat_truncate_session,
+            chat_rename_session,
+            chat_set_session_pinned,
             // Skills
             skills_list,
             skills_create,
@@ -691,7 +742,6 @@ pub fn run() {
             settings_list_models,
             settings_test_tavily,
             // Misc
-            planner_generate,
             survey_generate,
             survey_list,
             survey_get,
@@ -762,6 +812,16 @@ pub fn run() {
             writing_open_compiled_pdf,
             writing_open_mactex_installer,
             writing_open_mactex_download_page,
+            writing_record_version,
+            writing_list_versions,
+            writing_get_version,
+            writing_delete_version,
+            writing_clear_draft_versions,
+            writing_draft_create,
+            writing_draft_list,
+            writing_draft_get,
+            writing_draft_update,
+            writing_draft_delete,
             // Active Researcher
             active_researcher_scan,
             active_researcher_findings,

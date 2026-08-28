@@ -122,7 +122,8 @@ export default function VersionWorkspace({
         ) : (
           <>
             <div className="space-y-0">
-              {[...subVersions].reverse().map((version, index, reversedVersions) => {
+              {/* versions 统一为「最新在前」（created_at DESC），首个即最新版本 */}
+              {subVersions.map((version, index) => {
                 const isLatest = index === 0;
                 const stageStyle = STATUS_CFG[version.stage];
                 const inCompare = compareIds?.includes(version.id) ?? false;
@@ -138,7 +139,7 @@ export default function VersionWorkspace({
                             : { background: "var(--rc-card-bg)", borderColor: "var(--rc-border)" }
                         }
                       />
-                      {index < reversedVersions.length - 1 ? (
+                      {index < subVersions.length - 1 ? (
                         <div className="w-px flex-1 mt-1" style={{ background: "var(--rc-border)" }} />
                       ) : null}
                     </div>

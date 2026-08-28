@@ -68,9 +68,18 @@ export function useCopilotSessions() {
     return () => document.removeEventListener("click", handler);
   }, [menuSessionId]);
 
+  // 置顶优先、其余保持现有相对顺序（后端列表本身按 pinned DESC, updated_at DESC 排列）。
+  const sortSessionsByPin = (list: ChatSession[]) =>
+    [...list].sort((a, b) => Number(b.pinned ?? false) - Number(a.pinned ?? false));
+
   const syncSession = (updatedSession: ChatSession) => {
-    setSessions((prev) => [updatedSession, ...prev.filter((s) => s.id !== updatedSession.id)]);
-    setCurrentSession((prev) => (prev?.id === updatedSession.id ? updatedSession : prev));
+    setSessions((prev) => {
+      const existing = prev.find((s) => s.id === updatedSession.id);
+      // 合并既有条目：上游返回的对象可能缺少 pinned 等字段，避免覆盖丢失。
+      const merged = existing ? { ...existing, ...updatedSession } : updatedSession;
+      return sortSessionsByPin([merged, ...prev.filter((s) => s.id !== updatedSession.id)]);
+    });
+    setCurrentSession((prev) => (prev?.id === updatedSession.id ? { ...prev, ...updatedSession } : prev));
   };
 
   const handleNewChat = () => {
@@ -145,16 +154,23 @@ export function useCopilotSessions() {
     }
   };
 
-  const handlePinSession = (sessionId: string) => {
-    setSessions((prev) => {
-      const idx = prev.findIndex((s) => s.id === sessionId);
-      if (idx <= 0) return prev;
-      const item = prev[idx];
-      const next = [...prev];
-      next.splice(idx, 1);
-      next.unshift(item);
-      return next;
-    });
+  // 置顶/取消置顶：乐观更新 UI，写库失败时回滚并提示。
+  const handlePinSession = async (sessionId: string) => {
+    const target = sessions.find((s) => s.id === sessionId);
+    if (!target) return;
+    const nextPinned = !target.pinned;
+    const previous = sessions;
+    setSessions(sortSessionsByPin(
+      previous.map((s) => (s.id === sessionId ? { ...s, pinned: nextPinned } : s)),
+    ));
+    try {
+      const updated = await apiClient.chat.setSessionPinned(sessionId, nextPinned);
+      setSessions((prev) => prev.map((s) => (s.id === updated.id ? { ...s, ...updated } : s)));
+      setCurrentSession((prev) => (prev?.id === updated.id ? { ...prev, ...updated } : prev));
+    } catch (error) {
+      setSessions(previous);
+      setLoadError(formatErrorMessage(error));
+    }
   };
 
   const startRename = (session: ChatSession) => {
@@ -163,14 +179,26 @@ export function useCopilotSessions() {
     setMenuSessionId(null);
   };
 
-  const commitRename = () => {
-    if (renamingId && renameTitle.trim()) {
-      setSessions((prev) =>
-        prev.map((s) => (s.id === renamingId ? { ...s, title: renameTitle.trim() } : s)),
-      );
-    }
+  // 重命名：乐观更新 UI，写库失败时回滚。标题未变化时不发请求。
+  const commitRename = async () => {
+    const targetId = renamingId;
+    const title = renameTitle.trim();
     setRenamingId(null);
     setRenameTitle("");
+    if (!targetId || !title) return;
+    const previous = sessions;
+    if (previous.find((s) => s.id === targetId)?.title === title) return;
+    setSessions((prev) =>
+      prev.map((s) => (s.id === targetId ? { ...s, title } : s)),
+    );
+    try {
+      const updated = await apiClient.chat.renameSession(targetId, title);
+      setSessions((prev) => prev.map((s) => (s.id === updated.id ? { ...s, ...updated } : s)));
+      setCurrentSession((prev) => (prev?.id === updated.id ? { ...prev, ...updated } : prev));
+    } catch (error) {
+      setSessions(previous);
+      setLoadError(formatErrorMessage(error));
+    }
   };
 
   const cancelRename = () => {

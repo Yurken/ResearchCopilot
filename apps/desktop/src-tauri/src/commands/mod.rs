@@ -59,4 +59,6 @@ pub mod update;
 pub mod webdav_sync;
 pub mod workbench;
 pub mod writing;
+pub mod writing_drafts;
 pub mod writing_support;
+pub mod writing_versions;

@@ -2,11 +2,12 @@ use crate::assistant_prompts::specialist_system;
 use crate::ccf::match_venue;
 use crate::commands::paper_search::search_survey_candidates;
 use crate::commands::survey_support::{
-    build_formatted_citations, build_papers_by_year_text, build_papers_text, build_survey_markdown,
-    build_timeline_text, survey_planner_system, survey_timeline_system, survey_writer_system,
-    SURVEY_PLANNER_TPL, SURVEY_TIMELINE_TPL, SURVEY_WRITER_TPL,
+    apply_survey_preferences, build_formatted_citations, build_papers_by_year_text,
+    build_papers_text, build_survey_markdown, build_timeline_text, insert_survey,
+    is_usable_survey_report, survey_planner_system, survey_timeline_system, survey_writer_system,
+    try_acquire_survey_run_lock, SURVEY_PLANNER_TPL, SURVEY_TIMELINE_TPL, SURVEY_WRITER_TPL,
 };
-use crate::links::{paper_reference_url, paper_search_url};
+use crate::links::paper_reference_url;
 use crate::llm::{resolve_model, resolve_temperature, LlmClient, LlmMessage};
 use crate::state::AppState;
 use serde_json::json;
@@ -14,106 +15,6 @@ use sqlx::Row;
 use std::collections::HashSet;
 use tauri::{Emitter, State};
 use uuid::Uuid;
-
-// ── Planner ─────────────────────────────────────────────────────
-
-const PLANNER_TPL: &str = r#"请为研究主题「{topic}」（关键词：{keywords}）规划研究学习路径，仅返回合法 JSON：
-{{
-  "overview": "领域概述（2-3句）",
-  "prerequisites": [{{"name": "前置知识名", "description": "说明", "resources": ["推荐资源"]}}],
-  "learning_stages": [{{"stage": 1, "title": "阶段标题", "duration": "预计时长", "goals": ["学习目标"], "topics": ["学习主题"], "resources": ["资源"]}}],
-  "classic_papers": [{{"title": "论文标题", "authors": "作者", "year": 2020, "venue": "会议/期刊名称", "reason": "推荐理由"}}],
-  "research_directions": [{{"direction": "研究方向", "description": "描述", "open_problems": ["开放问题"]}}],
-  "tools_and_frameworks": ["工具/框架列表"],
-  "communities": ["社区/会议/期刊"]
-}}"#;
-
-fn planner_system() -> String {
-    specialist_system(
-        "研究方向规划助手",
-        "为研究者生成结构化、可执行、可落地的研究学习路径。",
-        Some("输出必须清晰、专业、可直接使用。"),
-    )
-}
-
-pub async fn run_planner_generation(
-    app: tauri::AppHandle,
-    settings: std::collections::HashMap<String, String>,
-    topic: String,
-    keywords: Vec<String>,
-) -> Result<(), String> {
-    let planner_id = Uuid::new_v4().to_string();
-    let _ = app.emit(
-        "interest:agent_start",
-        json!({
-            "id": "planner",
-            "agent": {
-                "id": planner_id,
-                "name": "学习路径规划",
-                "role": "生成研究方向学习计划",
-                "status": "running"
-            }
-        }),
-    );
-    tokio::spawn(async move {
-        let client = match LlmClient::from_settings(&settings) {
-            Ok(c) => c,
-            Err(e) => {
-                let _ = app.emit("planner:error", json!({ "error": e.to_string() }));
-                let _ = app.emit(
-                    "interest:error",
-                    json!({ "id": "planner", "error": e.to_string() }),
-                );
-                return;
-            }
-        };
-        let prompt = PLANNER_TPL
-            .replace("{topic}", &topic)
-            .replace("{keywords}", &keywords.join("、"));
-        let msgs = vec![
-            LlmMessage::system(planner_system()),
-            LlmMessage::user(&prompt),
-        ];
-        let planner_model = resolve_model(&settings, &["planner_generation_model"]);
-        let planner_temperature =
-            resolve_temperature(&settings, "planner_generation_temperature", 0.3);
-        match client
-            .chat(&msgs, planner_model.as_deref(), planner_temperature)
-            .await
-        {
-            Ok(resp) => {
-                let clean = extract_json(&resp);
-                let v: serde_json::Value = enrich_planner_result(
-                    serde_json::from_str(&clean).unwrap_or(json!({"raw": resp})),
-                );
-                let _ = app.emit("planner:result", json!({ "topic": topic, "plan": v }));
-                let _ = app.emit(
-                    "interest:agent_complete",
-                    json!({ "id": "planner", "agent": { "id": planner_id } }),
-                );
-            }
-            Err(e) => {
-                let _ = app.emit("planner:error", json!({ "error": e.to_string() }));
-                let _ = app.emit(
-                    "interest:error",
-                    json!({ "id": "planner", "error": e.to_string() }),
-                );
-            }
-        }
-    });
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn planner_generate(
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
-    topic: String,
-    keywords: Vec<String>,
-) -> Result<(), String> {
-    let settings = state.settings.read().await.clone();
-    run_planner_generation(app, settings, topic, keywords).await
-}
 
 #[tauri::command]
 pub async fn run_survey_generation(
@@ -135,7 +36,13 @@ pub async fn run_survey_generation(
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
+    // 同一时刻只允许一个综述生成任务，避免并发任务重复落库。
+    let Some(run_guard) = try_acquire_survey_run_lock() else {
+        return Err("已有综述生成任务正在进行，请等待其完成后再试。".to_string());
+    };
+
     tokio::spawn(async move {
+        let _run_guard = run_guard;
         let client = match LlmClient::from_settings(&settings) {
             Ok(c) => c,
             Err(e) => {
@@ -269,6 +176,15 @@ pub async fn run_survey_generation(
         );
 
         let paper_limit = i64::from(max_papers.unwrap_or(20).max(1));
+        // 文献类型/数据库偏好：现有数据只能加权排序，因此偏好生效时先扩大候选池再截断。
+        let lit_type_prefs = lit_types.clone().unwrap_or_default();
+        let database_prefs = databases.clone().unwrap_or_default();
+        let prefs_active = !lit_type_prefs.is_empty() || !database_prefs.is_empty();
+        let selection_limit = if prefs_active {
+            (paper_limit as usize).saturating_mul(3)
+        } else {
+            paper_limit as usize
+        };
         let pinned_ids = paper_ids
             .as_ref()
             .map(|v| {
@@ -312,7 +228,7 @@ pub async fn run_survey_generation(
                 &db,
                 &query,
                 &search_queries,
-                paper_limit,
+                selection_limit as i64,
                 time_from,
                 time_to,
             )
@@ -351,7 +267,7 @@ pub async fn run_survey_generation(
             {
                 Ok(external_papers) => {
                     let external_added =
-                        merge_survey_papers(&mut papers, external_papers, paper_limit as usize);
+                        merge_survey_papers(&mut papers, external_papers, selection_limit);
                     if external_added > 0 {
                         retrieval_summary = if papers.len() == external_added {
                             format!("已从外部学术源检索到 {} 篇候选文献", external_added)
@@ -369,6 +285,11 @@ pub async fn run_survey_generation(
                     }
                 }
             }
+        }
+
+        if prefs_active {
+            apply_survey_preferences(&mut papers, &lit_type_prefs, &database_prefs);
+            papers.truncate(paper_limit as usize);
         }
 
         if papers.is_empty() {
@@ -595,8 +516,26 @@ pub async fn run_survey_generation(
             Ok(resp) => {
                 let mut report = serde_json::from_str::<serde_json::Value>(&extract_json(&resp))
                     .unwrap_or(json!({}));
-                if !report.is_object() {
-                    report = json!({ "overall_summary": resp });
+                if !is_usable_survey_report(&report) {
+                    let message = "综述写作 Agent 未返回有效结果（输出为空或不是合法 JSON），本次不落库，请重试。";
+                    let _ = app.emit(
+                        "survey:agent_error",
+                        json!({
+                            "request_id": request_id,
+                            "agent": {
+                                "id": writer_agent_id,
+                                "name": "综述写作 Agent",
+                                "role": "生成全面结构化文献综述",
+                                "status": "failed",
+                                "error": message
+                            }
+                        }),
+                    );
+                    let _ = app.emit(
+                        "survey:error",
+                        json!({ "request_id": request_id, "error": message }),
+                    );
+                    return;
                 }
 
                 // Inject timeline from Timeline Analyst
@@ -634,24 +573,33 @@ pub async fn run_survey_generation(
                     "language": language.as_deref().unwrap_or("both")
                 });
                 let survey_id = Uuid::new_v4().to_string();
-                if let Err(e) = sqlx::query(
-                    "INSERT INTO surveys \
-                     (id, query, report_json, papers_json, citations_json, citation_format, language, meta_json, markdown) \
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                let save_error = match insert_survey(
+                    &db,
+                    &survey_id,
+                    &query,
+                    &report,
+                    &papers,
+                    &formatted_citations,
+                    cite_format,
+                    language.as_deref().unwrap_or("both"),
+                    &survey_meta,
+                    &markdown,
                 )
-                .bind(&survey_id)
-                .bind(&query)
-                .bind(serde_json::to_string(&report).unwrap_or_else(|_| "{}".into()))
-                .bind(serde_json::to_string(&papers).unwrap_or_else(|_| "[]".into()))
-                .bind(serde_json::to_string(&formatted_citations).unwrap_or_else(|_| "[]".into()))
-                .bind(cite_format)
-                .bind(language.as_deref().unwrap_or("both"))
-                .bind(serde_json::to_string(&survey_meta).unwrap_or_else(|_| "{}".into()))
-                .bind(&markdown)
-                .execute(&db)
                 .await
                 {
-                    eprintln!("[survey] 综述落盘失败: {e}");
+                    Ok(()) => None,
+                    Err(e) => {
+                        eprintln!("[survey] 综述落盘失败: {e}");
+                        Some(e)
+                    }
+                };
+                let saved = save_error.is_none();
+                if saved {
+                    // 通知前端刷新历史列表（聊天触发的综述也走这里落库）。
+                    let _ = app.emit(
+                        "survey:generated",
+                        json!({ "request_id": request_id, "id": survey_id, "query": query }),
+                    );
                 }
 
                 let _ = app.emit(
@@ -679,7 +627,12 @@ pub async fn run_survey_generation(
                 }));
                 let _ = app.emit(
                     "survey:done",
-                    json!({ "request_id": request_id, "content": markdown }),
+                    json!({
+                        "request_id": request_id,
+                        "content": markdown,
+                        "saved": saved,
+                        "save_error": save_error
+                    }),
                 );
             }
             Err(e) => {
@@ -849,13 +802,48 @@ fn extract_json(s: &str) -> String {
     let s = s.trim();
     let s = if s.starts_with("```") {
         let lines: Vec<&str> = s.lines().collect();
-        lines[1..lines.len().saturating_sub(1)].join("\n")
+        // 仅在末行是闭合围栏时才丢弃；未闭合的 ``` 输出保留末行内容。
+        let last_is_fence = lines
+            .last()
+            .map(|line| line.trim().starts_with("```"))
+            .unwrap_or(false);
+        let end = if last_is_fence {
+            lines.len().saturating_sub(1).max(1)
+        } else {
+            lines.len()
+        };
+        lines[1..end].join("\n")
     } else {
         s.to_string()
     };
-    let start = s.find('{').unwrap_or(0);
-    let end = s.rfind('}').map(|i| i + 1).unwrap_or(s.len());
-    s[start..end].to_string()
+    match (s.find('{'), s.rfind('}')) {
+        (Some(start), Some(end)) if start <= end => s[start..=end].to_string(),
+        (Some(start), None) => s[start..].to_string(),
+        _ => s,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_json;
+
+    #[test]
+    fn extract_json_strips_closed_fence() {
+        let input = "```json\n{\"a\": 1}\n```";
+        assert_eq!(extract_json(input), "{\"a\": 1}");
+    }
+
+    #[test]
+    fn extract_json_keeps_last_line_when_fence_unclosed() {
+        let input = "```json\n{\"a\": 1}";
+        assert_eq!(extract_json(input), "{\"a\": 1}");
+    }
+
+    #[test]
+    fn extract_json_trims_surrounding_prose() {
+        let input = "这是结果：\n{\"a\": 1}\n以上。";
+        assert_eq!(extract_json(input), "{\"a\": 1}");
+    }
 }
 
 fn truncate_for_prompt(text: &str, max_chars: usize) -> String {
@@ -1134,28 +1122,3 @@ async fn retrieve_papers(
     Ok(papers)
 }
 
-fn enrich_planner_result(mut value: serde_json::Value) -> serde_json::Value {
-    if let Some(papers) = value
-        .get_mut("classic_papers")
-        .and_then(|item| item.as_array_mut())
-    {
-        for paper in papers {
-            if let Some(venue) = paper.get("venue").and_then(|item| item.as_str()) {
-                if let Some(tag) = match_venue(venue) {
-                    paper["ccf_rating"] = json!(tag.rating);
-                    paper["ccf_area"] = json!(tag.area);
-                    paper["ccf_type"] = json!(tag.kind);
-                    paper["ccf_label"] = json!(tag.label);
-                    paper["ccf_publisher"] = json!(tag.publisher);
-                    paper["venue_url"] = json!(tag.url);
-                }
-            }
-            if let Some(title) = paper.get("title").and_then(|item| item.as_str()) {
-                if let Some(url) = paper_search_url(Some(title)) {
-                    paper["paper_url"] = json!(url);
-                }
-            }
-        }
-    }
-    value
-}

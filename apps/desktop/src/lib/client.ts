@@ -47,6 +47,12 @@ import { streamChat } from "./chatStream";
 import { streamTranslation } from "./translationStream";
 export { streamChat } from "./chatStream";
 import type {
+  WritingDraft,
+  WritingVersionRecordResult,
+  WritingVersionSnapshot,
+  WritingVersionSummary,
+} from "../features/writing/shared";
+import type {
   CitationCentralityEntry,
   CitationPathResult,
   CitationSubgraph,
@@ -639,14 +645,14 @@ export const chatApi = {
     }),
   listAgentRuns: (sessionId: string, requestId?: string): Promise<AgentRun[]> =>
     invoke("chat_list_agent_runs", { sessionId, requestId: requestId ?? null }),
+  /** 从某条消息起截断会话（删除该消息及其后所有消息），供重试/编辑重发前调用。 */
+  truncateSession: (sessionId: string, messageId: string): Promise<{ removed: number }> =>
+    invoke("chat_truncate_session", { sessionId, messageId }),
+  renameSession: (id: string, title: string): Promise<ChatSession> =>
+    invoke("chat_rename_session", { id, title }),
+  setSessionPinned: (id: string, pinned: boolean): Promise<ChatSession> =>
+    invoke("chat_set_session_pinned", { id, pinned }),
   stream: streamChat,
-};
-
-// ── Planner ───────────────────────────────────────────────────────
-
-export const plannerApi = {
-  generate: (topic: string, keywords: string[]): Promise<void> =>
-    invoke("planner_generate", { topic, keywords }),
 };
 
 // ── Survey ────────────────────────────────────────────────────────
@@ -960,10 +966,11 @@ export const submissionApi = {
 
   stats: () => invoke<{ active: number; pendingReviews: number; upcomingDdls: { name: string; deadline: string }[] }>("submission_stats"),
 
-  aiReview: (params: { submissionId: string; content: string; reviewerCount: number; strictness: string }) =>
+  aiReview: (params: { submissionId: string; content: string; reviewerCount: number; strictness: string; runId?: string }) =>
     invoke<void>("submission_ai_review", {
       submissionId: params.submissionId, content: params.content,
       reviewerCount: params.reviewerCount, strictness: params.strictness,
+      runId: params.runId ?? null,
     }),
   polishAbstract: (submissionId: string, text: string, requestId?: string) =>
     invoke<void>("submission_polish_abstract", { submissionId, text, requestId: requestId ?? null }),
@@ -1153,6 +1160,37 @@ export const writingApi = {
     invoke<void>("writing_open_mactex_installer"),
   openMactexDownloadPage: () =>
     invoke<void>("writing_open_mactex_download_page"),
+  // 草稿库：后端 SQLite 为唯一数据源，字段与前端 WritingDraft 一致（camelCase）。
+  listDrafts: () =>
+    invoke<WritingDraft[]>("writing_draft_list"),
+  createDraft: (draft: WritingDraft) =>
+    invoke<WritingDraft>("writing_draft_create", { request: draft }),
+  getDraft: (id: string) =>
+    invoke<WritingDraft>("writing_draft_get", { id }),
+  updateDraft: (draft: WritingDraft) =>
+    invoke<void>("writing_draft_update", { request: draft }),
+  /** 删除草稿，历史版本由后端级联清理。 */
+  deleteDraft: (id: string) =>
+    invoke<void>("writing_draft_delete", { id }),
+  // 历史版本：后端只做快照存取，恢复由前端应用。
+  recordVersion: (request: {
+    draftId: string;
+    mainTex: string;
+    bibtex: string;
+    texFiles: WritingTexFilePayload[];
+    notes: string;
+    source: "auto" | "manual";
+    force?: boolean;
+  }) =>
+    invoke<WritingVersionRecordResult>("writing_record_version", { request }),
+  listVersions: (draftId: string) =>
+    invoke<WritingVersionSummary[]>("writing_list_versions", { draftId }),
+  getVersion: (id: string) =>
+    invoke<WritingVersionSnapshot>("writing_get_version", { id }),
+  deleteVersion: (id: string) =>
+    invoke<void>("writing_delete_version", { id }),
+  clearDraftVersions: (draftId: string) =>
+    invoke<void>("writing_clear_draft_versions", { draftId }),
 };
 
 // ── Research Context API ───────────────────────────────────────────
@@ -1255,7 +1293,6 @@ export const apiClient = {
   papers: papersApi,
   knowledge: knowledgeApi,
   chat: chatApi,
-  planner: plannerApi,
   survey: surveyApi,
   skills: skillsApi,
   submission: submissionApi,

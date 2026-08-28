@@ -173,6 +173,7 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
     context_type TEXT NOT NULL DEFAULT 'general',
     context_id   TEXT,
     tag          TEXT NOT NULL DEFAULT '0',
+    pinned       INTEGER NOT NULL DEFAULT 0,
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -185,6 +186,8 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     sources    TEXT,
     images     TEXT,
     artifacts  TEXT,
+    -- completed / interrupted（用户终止）/ failed（模型或网络错误）
+    status     TEXT NOT NULL DEFAULT 'completed',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -470,6 +473,40 @@ CREATE TABLE IF NOT EXISTS dsh_usage_recorded (
 );
 ";
 
+// ── 写作草稿库（唯一数据源在后端 SQLite）与历史版本 ─────────────
+pub const WRITING_DRAFTS_DDL: &str = "
+CREATE TABLE IF NOT EXISTS writing_drafts (
+    id                   TEXT PRIMARY KEY,
+    project_name         TEXT NOT NULL DEFAULT '',
+    research_interest_id TEXT,
+    template_id          TEXT NOT NULL DEFAULT 'journal',
+    main_tex             TEXT NOT NULL DEFAULT '',
+    bibtex               TEXT NOT NULL DEFAULT '',
+    tex_files            TEXT NOT NULL DEFAULT '[]',
+    notes                TEXT NOT NULL DEFAULT '',
+    image_assets         TEXT NOT NULL DEFAULT '[]',
+    created_at           TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at           TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_writing_drafts_updated ON writing_drafts(updated_at DESC);
+";
+
+pub const WRITING_VERSIONS_DDL: &str = "
+CREATE TABLE IF NOT EXISTS writing_versions (
+    id           TEXT PRIMARY KEY,
+    draft_id     TEXT NOT NULL REFERENCES writing_drafts(id) ON DELETE CASCADE,
+    main_tex     TEXT NOT NULL,
+    bibtex       TEXT NOT NULL DEFAULT '',
+    tex_files    TEXT NOT NULL DEFAULT '[]',
+    notes        TEXT NOT NULL DEFAULT '',
+    content_hash TEXT NOT NULL,
+    source       TEXT NOT NULL DEFAULT 'auto',
+    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_writing_versions_draft_created
+    ON writing_versions(draft_id, created_at DESC);
+";
+
 // ── WebDAV 无冲突同步所需的本地元数据 ─────────────────────────────
 pub const SYNC_DDL: &str = "
 CREATE TABLE IF NOT EXISTS sync_tombstones (
@@ -565,9 +602,13 @@ pub async fn init_db(app_data_dir: &Path) -> Result<SqlitePool> {
     ensure_sync_tables(&pool).await?;
     ensure_artifacts_table(&pool).await?;
     ensure_chat_messages_artifacts_column(&pool).await?;
+    ensure_chat_messages_status_column(&pool).await?;
+    ensure_chat_sessions_pinned_column(&pool).await?;
     reset_stale_research_interest_plans(&pool).await?;
     ensure_github_project_search_history_table(&pool).await?;
     ensure_paper_search_history_table(&pool).await?;
+    ensure_writing_drafts_table(&pool).await?;
+    ensure_writing_versions_table(&pool).await?;
 
     Ok(pool)
 }
@@ -601,6 +642,16 @@ pub async fn ensure_paper_search_history_table(pool: &SqlitePool) -> Result<()> 
     )
     .execute(pool)
     .await?;
+    Ok(())
+}
+
+pub async fn ensure_writing_drafts_table(pool: &SqlitePool) -> Result<()> {
+    sqlx::raw_sql(WRITING_DRAFTS_DDL).execute(pool).await?;
+    Ok(())
+}
+
+pub async fn ensure_writing_versions_table(pool: &SqlitePool) -> Result<()> {
+    sqlx::raw_sql(WRITING_VERSIONS_DDL).execute(pool).await?;
     Ok(())
 }
 
@@ -1341,6 +1392,25 @@ pub async fn ensure_artifacts_table(pool: &SqlitePool) -> Result<()> {
 
 pub async fn ensure_chat_messages_artifacts_column(pool: &SqlitePool) -> Result<()> {
     ensure_table_column(pool, "chat_messages", "artifacts", "TEXT").await?;
+    Ok(())
+}
+
+/// 消息状态列：completed / interrupted（用户终止）/ failed（模型或网络错误）。
+/// 既有行默认 completed，行为与旧版本一致。
+pub async fn ensure_chat_messages_status_column(pool: &SqlitePool) -> Result<()> {
+    ensure_table_column(
+        pool,
+        "chat_messages",
+        "status",
+        "TEXT NOT NULL DEFAULT 'completed'",
+    )
+    .await?;
+    Ok(())
+}
+
+/// 会话置顶标记；chat_list_sessions 按 pinned DESC, updated_at DESC 排序。
+pub async fn ensure_chat_sessions_pinned_column(pool: &SqlitePool) -> Result<()> {
+    ensure_table_column(pool, "chat_sessions", "pinned", "INTEGER NOT NULL DEFAULT 0").await?;
     Ok(())
 }
 

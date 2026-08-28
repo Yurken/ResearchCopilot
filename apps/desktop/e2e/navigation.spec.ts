@@ -76,6 +76,23 @@ test.describe("应用导航", () => {
     await expect(page).toHaveURL("/settings");
   });
 
+  test("设置中切换到 Codex 后侧栏显示 Codex", async ({ page }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "界面布局" }).click();
+    await page.getByRole("button", { name: /Codex Harness/ }).click();
+    await expect(page.getByLabel("Codex")).toBeVisible();
+    await expect(page.getByLabel("Codex")).toHaveAttribute("href", "/codex");
+    await expect(page.getByLabel("DSH")).toHaveCount(0);
+  });
+
+  test("设置中切换到 OpenCode 后侧栏显示 OpenCode", async ({ page }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "界面布局" }).click();
+    await page.getByRole("button", { name: /OpenCode/ }).click();
+    await expect(page.getByLabel("OpenCode")).toHaveAttribute("href", "/opencode");
+    await expect(page.getByLabel("DSH")).toHaveCount(0);
+  });
+
   test("应支持键盘快捷键跳转设置", async ({ page }) => {
     // 等待侧边栏可见，确保键盘快捷键监听已注册。
     await expect(page.locator(".app-sidebar")).toBeVisible();

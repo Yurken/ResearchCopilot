@@ -22,7 +22,10 @@
       "zh-Hans.lproj": "zh-Hans.lproj",
       "zh_CN.lproj": "zh_CN.lproj",
       "resources/ccfddl.json": "resources/ccfddl.json",
-      "resources/dsh": "resources/dsh"
+      "resources/codex": "resources/codex",
+      "resources/dsh": "resources/dsh",
+      "resources/opencode": "resources/opencode",
+      "resources/pi-web": "resources/pi-web"
     },
     "windows": {
       "webviewInstallMode": {

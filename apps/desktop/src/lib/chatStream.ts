@@ -21,6 +21,8 @@ export async function* streamChat(
     chat_mode?: ChatMode;
     tag?: string;
     images?: Array<{ data: string; mediaType: string }>;
+    /** 前端生成的用户消息 id：提供时后端以其为落库主键，保证前后端消息 id 一致（重试/编辑重发可精确截断）。 */
+    user_message_id?: string;
   },
   signal?: AbortSignal
 ): AsyncGenerator<ChatStreamChunk> {
@@ -159,6 +161,7 @@ export async function* streamChat(
       chatMode: body.chat_mode ?? null,
       tag: body.tag ?? null,
       images: body.images ?? null,
+      userMessageId: body.user_message_id ?? null,
     });
     backendStarted = true;
 

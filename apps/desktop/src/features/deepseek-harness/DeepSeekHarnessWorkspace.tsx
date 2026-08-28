@@ -229,7 +229,7 @@ export default function DeepSeekHarnessWorkspace() {
         </div>
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-8">
-          <div className="mx-auto max-w-3xl">
+          <div className="mx-auto max-w-4xl">
             <div className="mb-5">
               <h2 className="text-xl font-semibold tracking-[-0.02em] text-ink-primary">启动 DSH</h2>
               <p className="mt-1.5 text-sm text-ink-tertiary">选择运行环境和工作目录，然后进入 Harness。</p>
@@ -252,8 +252,8 @@ export default function DeepSeekHarnessWorkspace() {
                 <RuntimeModeOption
                   mode="external"
                   active={draft.mode === "external"}
-                  title="外部 DSH"
-                  description="使用本机自行维护的版本"
+                  title="自定义 DSH"
+                  description="手动指定自行维护的可执行文件"
                   onSelect={(mode) => updateDraft("mode", mode)}
                 />
               </div>
@@ -261,7 +261,7 @@ export default function DeepSeekHarnessWorkspace() {
               {draft.mode === "bundled" && !runtime.snapshot?.bundledAvailable && (
                 <div className="mt-4 flex gap-2.5 rounded-2xl border border-amber-700/15 bg-amber-50/60 px-3.5 py-3 text-amber-900">
                   <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
-                  <p className="text-xs leading-5">当前开发构建还没有生成内置运行时。可先选择外部 DSH，或执行运行时构建脚本后再启动。</p>
+                  <p className="text-xs leading-5">当前开发构建还没有生成内置运行时。可先选择自定义 DSH，或执行运行时构建脚本后再启动。</p>
                 </div>
               )}
 
@@ -350,7 +350,7 @@ export default function DeepSeekHarnessWorkspace() {
                     </div>
                     {draft.mode === "external" && (
                       <div className="space-y-2">
-                        <label className="text-xs font-medium text-ink-secondary" htmlFor="dsh-home">外部 DSH_HOME</label>
+                        <label className="text-xs font-medium text-ink-secondary" htmlFor="dsh-home">自定义 DSH_HOME</label>
                         <div className="flex gap-2">
                           <Input
                             id="dsh-home"
@@ -359,7 +359,7 @@ export default function DeepSeekHarnessWorkspace() {
                             placeholder="默认 ~/.dsh"
                             className="min-w-0 flex-1"
                           />
-                          <Button variant="secondary" onClick={() => void pickDirectory("externalHome", "选择外部 DSH_HOME")}>
+                          <Button variant="secondary" onClick={() => void pickDirectory("externalHome", "选择自定义 DSH_HOME")}>
                             <FolderOpen className="h-4 w-4" />
                           </Button>
                         </div>

@@ -25,3 +25,5 @@ pub mod secure_store;
 pub mod sync_service;
 pub mod webdav_service;
 pub mod wiki;
+pub mod writing_draft_service;
+pub mod writing_version_service;

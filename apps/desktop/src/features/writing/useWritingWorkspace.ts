@@ -13,6 +13,7 @@ import { buildLatexImageFigureInsert } from "./latexProject";
 import { useWritingCompiler } from "./useWritingCompiler";
 import { useWritingDraftLibrary } from "./useWritingDraftLibrary";
 import { useWritingFileActions } from "./useWritingFileActions";
+import { useWritingVersions } from "./useWritingVersions";
 import { WRITING_TEMPLATES, getDefaultWritingTemplate, getWritingTemplate } from "./templates";
 import {
   findWritingTexFile,
@@ -36,6 +37,7 @@ export function useWritingWorkspace() {
     loadingInterests,
     interestError,
     lastSavedAt,
+    libraryReady,
     setActiveDraftId,
     updateActiveDraft,
     createDraft: createLibraryDraft,
@@ -75,6 +77,15 @@ export function useWritingWorkspace() {
   const showError = useCallback((nextError: string) => {
     setError(nextError);
   }, []);
+  const versionHistory = useWritingVersions({
+    // 草稿库未就绪时 activeDraft 是内存占位草稿，不触发任何版本记录。
+    draftId: libraryReady ? activeDraft.id : "",
+    mainTex,
+    bibtex,
+    texFiles,
+    notes,
+    onApplyVersion: updateActiveDraft,
+  });
   const compiler = useWritingCompiler({
     draftId: activeDraft.id,
     projectName,
@@ -317,6 +328,7 @@ export function useWritingWorkspace() {
   }, [createLibraryDraft]);
 
   const deleteDraft = useCallback((id: string) => {
+    // 历史版本由后端随草稿删除级联清理，无需单独调用。
     const deleted = deleteLibraryDraft(id);
     if (deleted) {
       setMessage("已删除文稿");
@@ -350,6 +362,7 @@ export function useWritingWorkspace() {
     message,
     error,
     lastSavedAt,
+    versionHistory,
     outline,
     stats,
     diagnostics,

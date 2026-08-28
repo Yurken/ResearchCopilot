@@ -76,11 +76,13 @@ export default function Submission() {
   const [polishLoading, setPolishLoading] = useState(false);
   const [polishSourceId, setPolishSourceId] = useState<string>("");
 
+  // 只依赖稳定的 setSubId 而非整个 review 对象，避免每轮渲染都执行本 effect
+  const { setSubId: setReviewSubId } = review;
   useEffect(() => {
     const firstSubmissionId = board.submissions[0]?.id ?? "";
     if (!firstSubmissionId) {
       if (versionSubId) setVersionSubId("");
-      if (review.subId) review.setSubId("");
+      if (review.subId) setReviewSubId("");
       return;
     }
 
@@ -88,9 +90,16 @@ export default function Submission() {
       setVersionSubId(firstSubmissionId);
     }
     if (!review.subId || !board.submissions.some((submission) => submission.id === review.subId)) {
-      review.setSubId(firstSubmissionId);
+      setReviewSubId(firstSubmissionId);
     }
-  }, [board.submissions, versionSubId, review.subId, review]);
+  }, [board.submissions, versionSubId, review.subId, setReviewSubId]);
+
+  // 反馈条自动消失，避免成功提示一直悬挂
+  useEffect(() => {
+    if (!feedback) return;
+    const timer = window.setTimeout(() => setFeedback(""), 5000);
+    return () => window.clearTimeout(timer);
+  }, [feedback]);
 
   // 当前 cover letter / 润色请求的 requestId，用于过滤对应流式事件：
   // requestId 每次请求唯一，既隔离多投稿并发，也防止同一投稿连续两次请求时旧 done 覆盖新流。
@@ -153,6 +162,8 @@ export default function Submission() {
         result = await submissionApi.syncCcfDdlLocal();
       }
       const venueCount = result?.updated ?? 0;
+      // 同步写库后立即刷新本地刊物列表，否则截止日期要重新进页面才更新
+      await venues.reloadVenues();
       setFeedback(venueCount > 0 ? `已同步 ${venueCount} 个期刊/会议的截止日期` : "没有需要更新的截止日期");
     } catch (err) { showError(err); }
     finally { setSyncingDdl(false); }
@@ -184,6 +195,7 @@ export default function Submission() {
         submissionId: versionSubId,
         tag: saveForm.tag || undefined,
         label: saveForm.label || undefined,
+        stage: "writing",
         content: saveForm.content || undefined,
         notes: saveForm.notes || undefined,
       });
@@ -204,11 +216,14 @@ export default function Submission() {
   };
 
   const handleImportAiReview = async () => {
-    const imported = await aiReview.importResults(review.round);
+    const imported = await aiReview.importResults();
     if (!imported) return;
-    if (imported.submissionId === review.subId) void review.reloadReview();
+    if (imported.submissionId === review.subId) {
+      review.setRound(imported.round);
+      void review.reloadReview();
+    }
     const summary = imported.feedbackSummary;
-    setFeedback(`已归档 ${imported.count} 条多视角审稿意见；价值反馈：采纳 ${summary.adopted}、完成 ${summary.done}、忽略 ${summary.ignored}`);
+    setFeedback(`已归档 ${imported.count} 条多视角审稿意见（第 ${imported.round} 轮）；价值反馈：采纳 ${summary.adopted}、完成 ${summary.done}、忽略 ${summary.ignored}`);
   };
 
   // Cover letter：打开弹窗即触发流式生成（监听器写入 coverLetterText）
@@ -216,7 +231,6 @@ export default function Submission() {
     if (!submissionId) return;
     const reqId = crypto.randomUUID();
     activeCoverReqRef.current = reqId;
-    setVersionSubId(submissionId);
     setCoverLetterText("");
     setCoverLetterLoading(true);
     setShowCoverLetterModal(true);
@@ -362,7 +376,7 @@ export default function Submission() {
           onDownloadVersionFile={handleDownloadVersionFile}
           onPolishVersion={handlePolishVersion}
           onOpenMockReview={(version) => {
-            aiReview.openForSubmission(version.submissionId, version.content);
+            aiReview.openForSubmission(version.submissionId, version.content, version.filePath);
           }}
         />}
       </div>

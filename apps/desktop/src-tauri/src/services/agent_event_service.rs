@@ -1,7 +1,8 @@
 use crate::agent_nodes::{agent_goal, agent_title};
+use crate::state::AppState;
 use serde::Serialize;
 use serde_json::{json, Value};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AgentPlanStep {
@@ -150,10 +151,16 @@ pub fn emit_agent_event(app: &tauri::AppHandle, event: AgentEvent) -> tauri::Res
             "chat:agent_complete",
             json!({ "request_id": request_id, "value": run }),
         ),
-        AgentEvent::TextDelta { request_id, delta } => app.emit(
-            "chat:delta",
-            json!({ "request_id": request_id, "delta": delta }),
-        ),
+        AgentEvent::TextDelta { request_id, delta } => {
+            // 同步累计部分内容到流元数据，用户取消或任务失败时据此补写部分回答。
+            if let Some(state) = app.try_state::<AppState>() {
+                state.record_chat_delta(&request_id, &delta);
+            }
+            app.emit(
+                "chat:delta",
+                json!({ "request_id": request_id, "delta": delta }),
+            )
+        }
         AgentEvent::RoutingDecision {
             request_id,
             policy,

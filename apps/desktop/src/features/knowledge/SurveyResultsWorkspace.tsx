@@ -78,6 +78,7 @@ export default function SurveyResultsWorkspace({ controller }: { controller: Sur
             agents={controller.agents}
             structured={controller.structured}
             fallbackCitationFormatLabel={controller.citationFormatLabel}
+            runFailed={Boolean(controller.error)}
           />
           <SurveyCandidatePapersPanel papers={controller.structured?.papers ?? []} />
         </div>

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>小妍 Codex Web</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark">C</span>
+          <div><strong>Codex Web</strong><small>小妍本地容器</small></div>
+        </div>
+        <button id="new-thread" class="new-thread" type="button">＋ 新建任务</button>
+        <div class="section-label">最近任务</div>
+        <nav id="threads" aria-label="Codex 任务列表"></nav>
+        <div class="connection"><span id="connection-dot"></span><span id="connection-label">正在连接</span></div>
+      </aside>
+      <main class="workspace">
+        <header>
+          <div class="title-wrap">
+            <h1 id="thread-title">新任务</h1>
+            <p id="workspace-path"></p>
+          </div>
+          <button id="interrupt" class="quiet danger" type="button" hidden>停止</button>
+        </header>
+        <section id="messages" class="messages" aria-live="polite">
+          <div id="empty-state" class="empty-state">
+            <div class="empty-mark">›_</div>
+            <h2>把任务交给 Codex</h2>
+            <p>直接使用官方 app-server 协议。线程、执行记录和审批都保存在你的 Codex 环境中。</p>
+          </div>
+        </section>
+        <section id="approvals" class="approvals" aria-live="assertive"></section>
+        <form id="composer" class="composer">
+          <textarea id="prompt" rows="1" placeholder="描述要完成的代码任务…" aria-label="Codex 任务"></textarea>
+          <div class="composer-footer">
+            <span>Enter 发送 · Shift+Enter 换行</span>
+            <button id="send" type="submit">发送</button>
+          </div>
+        </form>
+      </main>
+    </div>
+    <script src="/app.js" defer></script>
+  </body>
+</html>
