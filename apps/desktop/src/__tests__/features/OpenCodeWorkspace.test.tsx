@@ -9,7 +9,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args: unknown[]) => invokeM
 
 const stopped: OpenCodeRuntimeSnapshot = {
   phase: "stopped",
-  config: { mode: "path", externalExecutable: null, workspaceDir: null },
+  config: { mode: "auto", externalExecutable: null, workspaceDir: null },
   url: null, error: null, logs: [], pathAvailable: true, bundledAvailable: false, bundledExecutable: null,
   pathExecutable: "/opt/homebrew/bin/opencode", source: "https://github.com/anomalyco/opencode",
 };
@@ -20,14 +20,14 @@ describe("OpenCodeWorkspace", () => {
   it("shows the official web runtime launch controls", async () => {
     render(<OpenCodeWorkspace />);
     expect(await screen.findByRole("heading", { name: "启动 OpenCode" })).toBeInTheDocument();
-    expect(screen.getByText("内置 OpenCode")).toBeInTheDocument();
+    expect(screen.getByText("已发现本机 OpenCode")).toBeInTheDocument();
     expect(await screen.findByText(/\/opt\/homebrew\/bin\/opencode/)).toBeInTheDocument();
   });
 
   it("starts an externally selected runtime", async () => {
-    const user = userEvent.setup(); render(<OpenCodeWorkspace />); await screen.findByText("已安装 OpenCode");
-    await user.click(screen.getByRole("button", { name: /自定义 OpenCode/ }));
-    await user.type(screen.getByLabelText("opencode 可执行文件"), "/usr/local/bin/opencode");
+    const user = userEvent.setup(); render(<OpenCodeWorkspace />); await screen.findByText("已发现本机 OpenCode");
+    await user.click(screen.getByText("高级设置"));
+    await user.type(screen.getByRole("textbox", { name: /使用其他本机 OpenCode/ }), "/usr/local/bin/opencode");
     await user.click(screen.getByRole("button", { name: "启动 OpenCode" }));
     await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("opencode_runtime_configure", { config: expect.objectContaining({ mode: "external", externalExecutable: "/usr/local/bin/opencode" }) }));
   });

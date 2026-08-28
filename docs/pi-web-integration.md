@@ -4,7 +4,7 @@
 
 ## 启动结构
 
-1. 从 `PATH`、npm/pnpm 常见全局目录或用户指定路径查找 `pi-web`。
+1. 优先从 `PATH` 和 npm/pnpm 常见全局目录查找 `pi-web`；未找到时可一键安装到小妍私有目录，其他路径位于高级设置。
 2. 在所选工作目录执行：
 
    ```bash
@@ -21,5 +21,5 @@
 - 服务固定监听随机 loopback 端口，不暴露到局域网。
 - 设置 `PI_WEB_NO_OPEN=1` 并传入 `--no-open`，不会额外拉起系统浏览器。
 - Pi Web 和 Pi agent 以当前用户权限运行，能够读写所选项目并执行命令；小妍的 iframe 不是系统权限沙箱。
-- Pi Web 要求 Node.js 22.19.0 或更高版本。推荐使用 `npm install -g @agegr/pi-web` 安装发行版。
+- 本机 Pi Web 要求 Node.js 22.19.0 或更高版本；一键安装包自带匹配的 Node，不执行全局 npm 安装。
 - Pi 内核与 Web 上游分别固定在 `vendor/pi-harness`、`vendor/pi-web` submodule；统一升级流程见 `docs/harness-sources.md`。

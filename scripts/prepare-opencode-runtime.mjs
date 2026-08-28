@@ -46,7 +46,7 @@ function gitOutput(commandArgs) {
 }
 
 // 与 prepare-dsh-runtime / prepare-codex-runtime 一致的固定版本验证：
-// submodule 指针与上游版本必须和 manifest 一致，升级内置运行时必须先更新
+// submodule 指针与上游版本必须和 manifest 一致，升级托管运行时必须先更新
 // vendor/opencode-harness 并同步本 manifest。
 function verifyPin() {
   const sourcePackagePath = join(sourceRoot, "packages", "opencode", "package.json");

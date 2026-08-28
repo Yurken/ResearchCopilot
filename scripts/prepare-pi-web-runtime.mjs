@@ -46,7 +46,7 @@ function gitOutput(commandArgs) {
 }
 
 // 与 prepare-dsh-runtime 一致的固定版本验证：submodule 指针与上游版本必须
-// 和 manifest 一致，升级内置运行时必须先更新 vendor/pi-web 并同步本 manifest。
+// 和 manifest 一致，升级托管运行时必须先更新 vendor/pi-web 并同步本 manifest。
 function verifyPin() {
   if (!existsSync(join(sourceRoot, "package.json"))) {
     fail("Pi Web submodule is missing; run git submodule update --init --recursive");
@@ -98,7 +98,7 @@ function resolveNodeBinary() {
   return { binary, license: resolve(license), version: nodeVersion(binary) };
 }
 
-// 类型声明与 sourcemap 在运行时不会被加载，删除以缩小安装包体积
+// 类型声明与 sourcemap 在运行时不会被加载，删除以缩小下载包体积
 //（与 prepare-dsh-runtime 的剪枝规则一致）。
 function pruneNonRuntimeFiles(directory) {
   let removedFiles = 0;

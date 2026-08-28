@@ -139,20 +139,22 @@ pub async fn validate_secure_version(executable: &Path) -> Result<String, String
 }
 pub fn resolve_executable(config: &OpenCodeRuntimeConfig) -> Result<PathBuf, String> {
     match config.mode {
-        // Bundled 正常应经 OpenCodeRuntimeState::resolve_mode_executable 解析
-        //（内置优先、缺失回退）；此处是绕过 state 直接调用时的兜底。
-        OpenCodeRuntimeMode::Bundled | OpenCodeRuntimeMode::Path => find_opencode()
-            .ok_or_else(|| "未找到 OpenCode，请先安装或改为指定可执行文件".to_string()),
+        // Bundled 正常应经 OpenCodeRuntimeState::resolve_mode_executable 解析；
+        // 此处是绕过 state 直接调用时的本机发现兜底。
+        OpenCodeRuntimeMode::Auto | OpenCodeRuntimeMode::Bundled | OpenCodeRuntimeMode::Path => {
+            find_opencode()
+                .ok_or_else(|| "未找到 OpenCode，请先安装或改为指定可执行文件".to_string())
+        }
         OpenCodeRuntimeMode::External => {
             let executable = config
                 .external_executable
                 .as_deref()
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-                .ok_or_else(|| "请先选择自定义 OpenCode 可执行文件".to_string())?;
+                .ok_or_else(|| "请先选择本机 OpenCode 可执行文件".to_string())?;
             let path = Path::new(executable);
             if path.components().count() > 1 && !path.is_file() {
-                return Err("自定义 OpenCode 可执行文件不存在".to_string());
+                return Err("本机 OpenCode 可执行文件不存在".to_string());
             }
             Ok(path.to_path_buf())
         }

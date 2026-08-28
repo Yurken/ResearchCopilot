@@ -27,7 +27,7 @@ const OPTIONS: Array<{
   {
     id: "opencode",
     title: "OpenCode",
-    description: "托管 OpenCode 官方 Web 页面和本地运行时。",
+    description: "运行 OpenCode 官方 Web 页面，优先使用本机版本。",
     icon: OpenCodeIcon,
   },
   {

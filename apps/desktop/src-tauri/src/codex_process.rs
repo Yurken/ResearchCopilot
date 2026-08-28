@@ -210,7 +210,7 @@ pub fn resolve_executable(config: &CodexRuntimeConfig) -> Result<PathBuf, String
     match config.mode {
         // Bundled 由 CodexRuntimeState::resolve_mode_executable 处理（需要 resource_dir），
         // 走到这里说明调用方未经过 state，退化为已安装版本发现逻辑。
-        CodexRuntimeMode::Bundled | CodexRuntimeMode::Path => find_codex()
+        CodexRuntimeMode::Auto | CodexRuntimeMode::Bundled | CodexRuntimeMode::Path => find_codex()
             .ok_or_else(|| "未找到官方 Codex Harness，请先安装或改为指定可执行文件".to_string()),
         CodexRuntimeMode::External => {
             let executable = config
@@ -218,10 +218,10 @@ pub fn resolve_executable(config: &CodexRuntimeConfig) -> Result<PathBuf, String
                 .as_deref()
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-                .ok_or_else(|| "请先选择自定义 Codex 可执行文件".to_string())?;
+                .ok_or_else(|| "请先选择本机 Codex 可执行文件".to_string())?;
             let path = Path::new(executable);
             if path.components().count() > 1 && !path.is_file() {
-                return Err("自定义 Codex 可执行文件不存在".to_string());
+                return Err("本机 Codex 可执行文件不存在".to_string());
             }
             Ok(path.to_path_buf())
         }
@@ -244,7 +244,7 @@ pub fn format_exit_error(status: std::process::ExitStatus, was_starting: bool) -
     {
         use std::os::unix::process::ExitStatusExt;
         if status.signal() == Some(9) && was_starting {
-            return "Codex 启动被中断（SIGKILL）。开发模式重载会停止内置进程，请等待应用稳定后重试。"
+            return "Codex 启动被中断（SIGKILL）。开发模式重载会停止运行时进程，请等待应用稳定后重试。"
                 .to_string();
         }
     }

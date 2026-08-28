@@ -13,7 +13,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 const stoppedSnapshot: CodexRuntimeSnapshot = {
   phase: "stopped",
   config: {
-    mode: "path",
+    mode: "auto",
     externalExecutable: null,
     externalHome: null,
     workspaceDir: null,
@@ -51,8 +51,9 @@ describe("CodexWorkspace", () => {
 
     expect(await screen.findByRole("heading", { name: "启动 Codex" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Codex Harness" })).toBeInTheDocument();
-    expect(screen.getByText("内置 Codex")).toBeInTheDocument();
-    expect(screen.getByText("已安装 Codex")).toBeInTheDocument();
+    expect(screen.getByText("已发现本机 Codex")).toBeInTheDocument();
+    expect(screen.getByText("/usr/local/bin/codex")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "一键安装" })).not.toBeInTheDocument();
     expect(screen.queryByText("小妍代码")).not.toBeInTheDocument();
     expect(screen.queryByText("DeepSeek Harness")).not.toBeInTheDocument();
   });
@@ -60,16 +61,15 @@ describe("CodexWorkspace", () => {
   it("passes an external executable through the runtime controller", async () => {
     const user = userEvent.setup();
     render(<CodexWorkspace />);
-    await screen.findByText("已安装 Codex");
-
-    await user.click(screen.getByRole("button", { name: /自定义 Codex/ }));
-    await user.type(screen.getByLabelText("codex 可执行文件"), "/usr/local/bin/codex");
+    await screen.findByText("已发现本机 Codex");
+    await user.click(screen.getByRole("button", { name: "高级配置" }));
+    await user.type(screen.getByRole("textbox", { name: /使用其他本机 Codex/ }), "/custom/bin/codex");
     await user.click(screen.getByRole("button", { name: "启动 Codex" }));
 
     await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("codex_runtime_configure", {
       config: expect.objectContaining({
         mode: "external",
-        externalExecutable: "/usr/local/bin/codex",
+        externalExecutable: "/custom/bin/codex",
       }),
     }));
     await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("codex_runtime_start"));
@@ -92,7 +92,7 @@ describe("CodexWorkspace", () => {
   it("configures the current Xiaoyan API without exposing its credential", async () => {
     const user = userEvent.setup();
     render(<CodexWorkspace />);
-    await screen.findByText("已安装 Codex");
+    await screen.findByText("已发现本机 Codex");
 
     await user.click(screen.getByRole("button", { name: "配置小妍 API" }));
 

@@ -64,6 +64,12 @@ jobs:
       - name: Verify DeepSeek Harness source pin
         run: pnpm dsh:verify-pin
 
+      - name: Verify Harness runtimes are excluded from installers
+        run: pnpm runtime:verify-distribution
+
+      - name: Verify managed runtimes are published
+        run: pnpm runtime:verify-published
+
       - name: Type check workspace
         run: pnpm type-check
 
@@ -241,11 +247,6 @@ jobs:
 
       - name: Sync versions from tag
         run: node scripts/sync-version.mjs --tag "${{ env.RELEASE_TAG }}"
-
-      - name: Prepare locked DeepSeek Harness runtime
-        shell: bash
-        run: |
-          DSH_NODE_BINARY="$(node -p 'process.execPath')" pnpm dsh:prepare-runtime
 
       - name: Build application
         uses: tauri-apps/tauri-action@v1

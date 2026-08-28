@@ -13,7 +13,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 const stoppedSnapshot: DshRuntimeSnapshot = {
   phase: "stopped",
   config: {
-    mode: "bundled",
+    mode: "auto",
     externalExecutable: null,
     externalHome: null,
     profile: "web",
@@ -23,6 +23,8 @@ const stoppedSnapshot: DshRuntimeSnapshot = {
   error: null,
   logs: [],
   bundledAvailable: true,
+  pathAvailable: false,
+  pathExecutable: null,
   lockedVersion: "0.1.0-rc.5",
   lockedCommit: "47f943859bef60e4160492346772ded9b24f765a",
   nodeRequirement: "^22.19.0 || >=24.0.0",
@@ -54,7 +56,7 @@ describe("DeepSeekHarnessWorkspace", () => {
     expect(await screen.findByRole("heading", { name: "启动 DSH" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "DeepSeek Harness" })).toBeInTheDocument();
     expect(screen.queryByText("小妍代码")).not.toBeInTheDocument();
-    expect(screen.getByText("内置 DSH")).toBeInTheDocument();
+    expect(screen.getByText("DSH 已安装在小妍私有目录")).toBeInTheDocument();
     expect(screen.queryByText(/0\.1\.0-rc\.5/)).not.toBeInTheDocument();
     expect(screen.queryByText("Node 运行要求")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "官方源码" })).not.toBeInTheDocument();
@@ -65,10 +67,9 @@ describe("DeepSeekHarnessWorkspace", () => {
   it("passes an external executable through the runtime controller", async () => {
     const user = userEvent.setup();
     render(<DeepSeekHarnessWorkspace />);
-    await screen.findByText("内置 DSH");
-
-    await user.click(screen.getByRole("button", { name: /自定义 DSH/ }));
-    await user.type(screen.getByLabelText("dsh 可执行文件"), "/usr/local/bin/dsh");
+    await screen.findByText("DSH 已安装在小妍私有目录");
+    await user.click(screen.getByRole("button", { name: "高级配置" }));
+    await user.type(screen.getByLabelText(/使用其他本机 DSH/), "/usr/local/bin/dsh");
     await user.click(screen.getByRole("button", { name: "启动 DSH" }));
 
     await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("dsh_runtime_configure", {
@@ -102,7 +103,7 @@ describe("DeepSeekHarnessWorkspace", () => {
   it("configures the current Xiaoyan API without exposing its credential", async () => {
     const user = userEvent.setup();
     render(<DeepSeekHarnessWorkspace />);
-    await screen.findByText("内置 DSH");
+    await screen.findByText("DSH 已安装在小妍私有目录");
 
     await user.click(screen.getByRole("button", { name: "配置小妍 API" }));
 

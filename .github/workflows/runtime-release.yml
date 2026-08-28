@@ -1,0 +1,166 @@
+name: Managed Runtime Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Independent runtime release id, e.g. 2026-08-28.1"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runtime-release-${{ inputs.release }}
+  cancel-in-progress: false
+
+env:
+  RUNTIME_RELEASE: ${{ inputs.release }}
+
+jobs:
+  validate:
+    name: Validate runtime release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate release id
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$RUNTIME_RELEASE" =~ ^[0-9A-Za-z][0-9A-Za-z._-]{0,79}$ ]]; then
+            echo "Invalid runtime release id: $RUNTIME_RELEASE"
+            exit 1
+          fi
+
+  build:
+    name: Build runtimes (${{ matrix.target }})
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14-xlarge
+            target: darwin-aarch64
+          - runner: windows-latest
+            target: windows-x86_64
+          - runner: ubuntu-22.04
+            target: linux-x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          submodules: recursive
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            vendor/deepseek-harness/pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build pinned runtimes
+        shell: bash
+        run: |
+          set -euo pipefail
+          node_binary="$(node -p 'process.execPath')"
+          DSH_NODE_BINARY="$node_binary" pnpm dsh:prepare-runtime
+          PI_WEB_NODE_BINARY="$node_binary" pnpm pi-web:prepare-runtime
+          pnpm codex:prepare-runtime
+          pnpm opencode:prepare-runtime
+
+      - name: Package runtime archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          output=".runtime-artifacts/${{ matrix.target }}"
+          mkdir -p "$output"
+          for provider in codex dsh opencode pi-web; do
+            tar -czf "$output/${provider}.tar.gz" \
+              -C "apps/desktop/src-tauri/resources/${provider}" runtime
+          done
+          ls -lh "$output"
+
+      - name: Install AWS CLI
+        shell: bash
+        run: |
+          if command -v aws >/dev/null 2>&1; then exit 0; fi
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            curl -fsSL "https://awscli.amazonaws.com/AWSCLIV2.msi" -o AWSCLIV2.msi
+            msiexec.exe /i AWSCLIV2.msi /qn
+          else
+            python3 -m pip install awscli
+          fi
+
+      - name: Upload runtime archives
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          aws s3 cp ".runtime-artifacts/${{ matrix.target }}/" \
+            "s3://${{ secrets.R2_BUCKET_NAME }}/runtimes/${RUNTIME_RELEASE}/${{ matrix.target }}/" \
+            --recursive --endpoint-url "$AWS_ENDPOINT_URL"
+
+  publish-manifest:
+    name: Publish runtime manifest
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Install AWS CLI
+        run: python3 -m pip install awscli
+
+      - name: Download archives and generate manifest
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT }}
+          AWS_DEFAULT_REGION: auto
+          R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
+        run: |
+          set -euo pipefail
+          for target in darwin-aarch64 windows-x86_64 linux-x86_64; do
+            mkdir -p ".runtime-artifacts/${target}"
+            aws s3 cp \
+              "s3://${{ secrets.R2_BUCKET_NAME }}/runtimes/${RUNTIME_RELEASE}/${target}/" \
+              ".runtime-artifacts/${target}/" --recursive --endpoint-url "$AWS_ENDPOINT_URL"
+          done
+          base="${R2_PUBLIC_BASE_URL%/}/runtimes/${RUNTIME_RELEASE}"
+          node scripts/generate-runtime-manifest.mjs \
+            --input-dir .runtime-artifacts \
+            --base-url "$base" \
+            --release "$RUNTIME_RELEASE" \
+            --output runtimes-latest.json
+          cat runtimes-latest.json
+
+      - name: Publish immutable and latest manifests
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          set -euo pipefail
+          bucket="${{ secrets.R2_BUCKET_NAME }}"
+          for destination in "runtimes/latest.json" "runtimes/${RUNTIME_RELEASE}/manifest.json"; do
+            aws s3 cp runtimes-latest.json "s3://${bucket}/${destination}" \
+              --content-type application/json --cache-control "no-cache" \
+              --endpoint-url "$AWS_ENDPOINT_URL"
+          done

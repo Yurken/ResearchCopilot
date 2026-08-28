@@ -90,10 +90,12 @@ test.describe("DSH 页面", () => {
     await expect(page.getByRole("heading", { name: "启动 DSH" })).toBeVisible();
   });
 
-  test("应显示运行环境选项", async ({ page }) => {
+  test("未发现本机 DSH 时应显示一键安装和高级路径", async ({ page }) => {
     await expect(page.getByRole("heading", { name: "运行环境" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "内置 DSH" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "自定义 DSH" })).toBeVisible();
+    await expect(page.getByText(/未找到本机 DSH/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "一键安装" })).toBeVisible();
+    await page.getByRole("button", { name: "高级配置" }).click();
+    await expect(page.getByLabel(/使用其他本机 DSH/)).toBeVisible();
   });
 
   test("应显示工作目录选择", async ({ page }) => {
@@ -119,11 +121,12 @@ test.describe("Codex 页面", () => {
     await expect(page.getByRole("heading", { name: "启动 Codex" })).toBeVisible();
   });
 
-  test("应显示运行环境选项", async ({ page }) => {
+  test("未发现本机 Codex 时应显示一键安装和高级路径", async ({ page }) => {
     await expect(page.getByRole("heading", { name: "运行环境" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "内置 Codex" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "已安装 Codex" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "自定义 Codex" })).toBeVisible();
+    await expect(page.getByText(/未找到本机 Codex/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "一键安装" })).toBeVisible();
+    await page.getByRole("button", { name: "高级配置" }).click();
+    await expect(page.getByLabel(/使用其他本机 Codex/)).toBeVisible();
   });
 });
 
@@ -136,9 +139,10 @@ test.describe("OpenCode 页面", () => {
   test("应显示 OpenCode 启动区域", async ({ page }) => {
     await expect(page.getByRole("heading", { name: "OpenCode", exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "启动 OpenCode" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "内置 OpenCode" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "已安装 OpenCode" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "自定义 OpenCode" })).toBeVisible();
+    await expect(page.getByText(/未找到本机 OpenCode/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "一键安装" })).toBeVisible();
+    await page.getByText("高级设置").click();
+    await expect(page.getByLabel(/使用其他本机 OpenCode/)).toBeVisible();
   });
 });
 

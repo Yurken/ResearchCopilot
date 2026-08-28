@@ -1,8 +1,11 @@
 use crate::append_diagnostic_log;
 use crate::dsh_api_config::{
-    resolve_xiaoyan_api, write_dsh_api_configuration, DshApiImportResult, fetch_available_models,
+    fetch_available_models, resolve_xiaoyan_api, write_dsh_api_configuration, DshApiImportResult,
 };
-use crate::dsh_process::{bundled_available, format_exit_error, launch_command, stop_child};
+use crate::dsh_process::{
+    bundled_available, find_dsh, format_exit_error, launch_command, path_available, stop_child,
+};
+use crate::runtime_installer::{managed_runtime_dir, ManagedRuntimeProvider};
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -11,7 +14,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use tauri::{AppHandle, State};
+use tauri::State;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::{Child, Command},
@@ -25,6 +28,7 @@ const MAX_LOG_LINES: usize = 120;
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DshRuntimeMode {
+    Auto,
     Bundled,
     External,
 }
@@ -32,7 +36,7 @@ pub enum DshRuntimeMode {
 impl DshRuntimeMode {
     fn data_dir_name(self) -> &'static str {
         match self {
-            Self::Bundled => "bundled-home",
+            Self::Auto | Self::Bundled => "bundled-home",
             Self::External => "external-home",
         }
     }
@@ -51,7 +55,7 @@ pub struct DshRuntimeConfig {
 impl Default for DshRuntimeConfig {
     fn default() -> Self {
         Self {
-            mode: DshRuntimeMode::Bundled,
+            mode: DshRuntimeMode::Auto,
             external_executable: None,
             external_home: None,
             profile: "web".to_string(),
@@ -87,6 +91,8 @@ pub struct DshRuntimeSnapshot {
     error: Option<String>,
     logs: Vec<String>,
     bundled_available: bool,
+    path_available: bool,
+    path_executable: Option<String>,
     locked_version: String,
     locked_commit: String,
     node_requirement: String,
@@ -159,7 +165,7 @@ pub struct DshRuntimeState {
 
 impl DshRuntimeState {
     pub fn new(app_data_dir: PathBuf) -> Self {
-        let config = read_config(&app_data_dir).unwrap_or_default();
+        let config = normalize_config(read_config(&app_data_dir).unwrap_or_default());
         Self {
             app_data_dir,
             inner: Arc::new(Mutex::new(RuntimeInner::new(config))),
@@ -174,6 +180,10 @@ impl DshRuntimeState {
         self.app_data_dir
             .join("dsh")
             .join(DshRuntimeMode::Bundled.data_dir_name())
+    }
+
+    fn managed_runtime(&self) -> PathBuf {
+        managed_runtime_dir(&self.app_data_dir, ManagedRuntimeProvider::Dsh)
     }
 
     fn external_home(&self, config: &DshRuntimeConfig) -> PathBuf {
@@ -192,10 +202,35 @@ impl DshRuntimeState {
 
     fn data_home(&self, config: &DshRuntimeConfig) -> PathBuf {
         match config.mode {
+            DshRuntimeMode::Auto if path_available() => self.external_home(config),
+            DshRuntimeMode::Auto => self
+                .app_data_dir
+                .join("dsh")
+                .join(DshRuntimeMode::Auto.data_dir_name()),
             DshRuntimeMode::Bundled => self.bundled_home(),
             DshRuntimeMode::External => self.external_home(config),
         }
     }
+}
+
+fn normalize_config(mut config: DshRuntimeConfig) -> DshRuntimeConfig {
+    if config.mode == DshRuntimeMode::Bundled {
+        config.mode = DshRuntimeMode::Auto;
+    }
+    config.external_executable = config
+        .external_executable
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    config.external_home = config
+        .external_home
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    config.workspace_dir = config
+        .workspace_dir
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    config.profile = config.profile.trim().to_string();
+    config
 }
 
 fn manifest() -> DshManifest {
@@ -322,7 +357,7 @@ fn apply_output_line(runtime: &mut RuntimeInner, generation: u64, stream_name: &
     }
 }
 
-async fn snapshot(app: &AppHandle, state: &DshRuntimeState) -> DshRuntimeSnapshot {
+async fn snapshot(state: &DshRuntimeState) -> DshRuntimeSnapshot {
     let metadata = manifest();
     let mut inner = state.inner.lock().await;
     inner.refresh_child_status();
@@ -332,7 +367,9 @@ async fn snapshot(app: &AppHandle, state: &DshRuntimeState) -> DshRuntimeSnapsho
         url: inner.url.clone(),
         error: inner.error.clone(),
         logs: inner.logs.iter().cloned().collect(),
-        bundled_available: bundled_available(app),
+        bundled_available: bundled_available(&state.managed_runtime()),
+        path_available: path_available(),
+        path_executable: find_dsh().map(|path| path.display().to_string()),
         locked_version: metadata.version,
         locked_commit: metadata.commit,
         node_requirement: metadata.node_requirement,
@@ -343,31 +380,17 @@ async fn snapshot(app: &AppHandle, state: &DshRuntimeState) -> DshRuntimeSnapsho
 
 #[tauri::command]
 pub async fn dsh_runtime_status(
-    app: AppHandle,
     state: State<'_, DshRuntimeState>,
 ) -> Result<DshRuntimeSnapshot, String> {
-    Ok(snapshot(&app, state.inner()).await)
+    Ok(snapshot(state.inner()).await)
 }
 
 #[tauri::command]
 pub async fn dsh_runtime_configure(
-    app: AppHandle,
     state: State<'_, DshRuntimeState>,
     mut config: DshRuntimeConfig,
 ) -> Result<DshRuntimeSnapshot, String> {
-    config.profile = config.profile.trim().to_string();
-    config.external_executable = config
-        .external_executable
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
-    config.external_home = config
-        .external_home
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
-    config.workspace_dir = config
-        .workspace_dir
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
+    config = normalize_config(config);
     validate_config(&config)?;
 
     {
@@ -383,12 +406,11 @@ pub async fn dsh_runtime_configure(
         inner.url = None;
         inner.error = None;
     }
-    Ok(snapshot(&app, state.inner()).await)
+    Ok(snapshot(state.inner()).await)
 }
 
 #[tauri::command]
 pub async fn dsh_runtime_start(
-    app: AppHandle,
     state: State<'_, DshRuntimeState>,
 ) -> Result<DshRuntimeSnapshot, String> {
     let (stdout, stderr, generation) = {
@@ -396,14 +418,18 @@ pub async fn dsh_runtime_start(
         inner.refresh_child_status();
         if inner.child.is_some() {
             drop(inner);
-            return Ok(snapshot(&app, state.inner()).await);
+            return Ok(snapshot(state.inner()).await);
         }
         let config = inner.config.clone();
         fs::create_dir_all(state.data_home(&config))
             .map_err(|error| format!("创建 DSH 数据目录失败：{error}"))?;
         let workspace = workspace_dir(state.inner(), &config)?;
-        let mut command =
-            launch_command(&app, &config, workspace.clone(), state.data_home(&config))?;
+        let mut command = launch_command(
+            &state.managed_runtime(),
+            &config,
+            workspace.clone(),
+            state.data_home(&config),
+        )?;
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(error) => {
@@ -427,8 +453,9 @@ pub async fn dsh_runtime_start(
         inner.push_log(format!(
             "[xiaoyan] 正在启动 {} profile={} workspace={}",
             match config.mode {
-                DshRuntimeMode::Bundled => "内置 DSH",
-                DshRuntimeMode::External => "自定义 DSH",
+                DshRuntimeMode::Auto => "自动选择 DSH",
+                DshRuntimeMode::Bundled => "托管 DSH",
+                DshRuntimeMode::External => "本机 DSH",
             },
             config.profile,
             workspace.display()
@@ -454,12 +481,11 @@ pub async fn dsh_runtime_start(
         ));
     }
 
-    Ok(snapshot(&app, state.inner()).await)
+    Ok(snapshot(state.inner()).await)
 }
 
 #[tauri::command]
 pub async fn dsh_runtime_stop(
-    app: AppHandle,
     runtime_state: State<'_, DshRuntimeState>,
     app_state: State<'_, AppState>,
 ) -> Result<DshRuntimeSnapshot, String> {
@@ -476,7 +502,7 @@ pub async fn dsh_runtime_stop(
     };
     crate::dsh_usage::collect_usage(&data_home, &app_state.db).await;
     append_diagnostic_log("dsh: runtime stopped");
-    Ok(snapshot(&app, runtime_state.inner()).await)
+    Ok(snapshot(runtime_state.inner()).await)
 }
 
 #[tauri::command]
@@ -490,19 +516,19 @@ pub async fn dsh_runtime_validate_external(executable: String) -> Result<String,
         Command::new(executable).arg("--version").output(),
     )
     .await
-    .map_err(|_| "自定义 DSH 版本检查超时".to_string())?
-    .map_err(|error| format!("无法执行自定义 DSH：{error}"))?;
+    .map_err(|_| "本机 DSH 版本检查超时".to_string())?
+    .map_err(|error| format!("无法执行本机 DSH：{error}"))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if stderr.is_empty() {
-            format!("自定义 DSH 版本检查失败（{}）", output.status)
+            format!("本机 DSH 版本检查失败（{}）", output.status)
         } else {
             stderr
         });
     }
     let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if version.is_empty() {
-        return Err("自定义 DSH 未返回版本号".to_string());
+        return Err("本机 DSH 未返回版本号".to_string());
     }
     Ok(version)
 }
@@ -550,6 +576,20 @@ mod tests {
         assert!(validate_profile("xiaoyan-dev_1").is_ok());
         assert!(validate_profile("../../escape").is_err());
         assert!(validate_profile("profile name").is_err());
+    }
+
+    #[test]
+    fn default_and_legacy_runtime_modes_use_auto() {
+        assert_eq!(DshRuntimeConfig::default().mode, DshRuntimeMode::Auto);
+        let config = normalize_config(DshRuntimeConfig {
+            mode: DshRuntimeMode::Bundled,
+            ..DshRuntimeConfig::default()
+        });
+        assert_eq!(config.mode, DshRuntimeMode::Auto);
+        assert_eq!(
+            DshRuntimeMode::Auto.data_dir_name(),
+            DshRuntimeMode::Bundled.data_dir_name()
+        );
     }
 
     #[test]
