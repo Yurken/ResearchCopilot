@@ -34,6 +34,7 @@ mod pi_web;
 mod pi_web_process;
 mod rag;
 mod repositories;
+mod runtime_installer;
 mod semantic_scholar;
 mod services;
 mod state;
@@ -66,8 +67,7 @@ use commands::{
     chat::{
         chat_cancel, chat_delete_session, chat_ensure_session, chat_get_session,
         chat_list_agent_runs, chat_list_sessions, chat_rename_session, chat_save_message,
-        chat_set_session_pinned, chat_stream, chat_truncate_session,
-        chat_update_session_context,
+        chat_set_session_pinned, chat_stream, chat_truncate_session, chat_update_session_context,
     },
     citation_graph::{
         knowledge_graph_citation_centrality, knowledge_graph_citation_shortest_path,
@@ -349,19 +349,11 @@ pub fn run() {
                 .app_data_dir()
                 .expect("failed to get app data dir");
 
+            app.manage(runtime_installer::RuntimeInstallerState::new(app_data_dir.clone()));
             app.manage(dsh::DshRuntimeState::new(app_data_dir.clone()));
-            app.manage(codex::CodexRuntimeState::new(
-                app_data_dir.clone(),
-                app.path().resource_dir().ok(),
-            ));
-            app.manage(opencode::OpenCodeRuntimeState::new(
-                app_data_dir.clone(),
-                app.path().resource_dir().ok(),
-            ));
-            app.manage(pi_web::PiWebRuntimeState::new(
-                app_data_dir.clone(),
-                app.path().resource_dir().ok(),
-            ));
+            app.manage(codex::CodexRuntimeState::new(app_data_dir.clone()));
+            app.manage(opencode::OpenCodeRuntimeState::new(app_data_dir.clone()));
+            app.manage(pi_web::PiWebRuntimeState::new(app_data_dir.clone()));
 
             configure_diagnostic_log_path(&app_data_dir);
             append_diagnostic_log(&format!(
@@ -568,6 +560,8 @@ pub fn run() {
             pi_web::pi_web_runtime_start,
             pi_web::pi_web_runtime_stop,
             pi_web::pi_web_runtime_validate_external,
+            // Downloadable managed runtimes
+            runtime_installer::runtime_download_managed,
             // Papers
             papers_list,
             papers_get,

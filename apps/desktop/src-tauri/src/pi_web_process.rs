@@ -119,8 +119,8 @@ pub fn path_available() -> bool {
     find_pi_web().is_some()
 }
 
-/// 一次 Pi 启动的程序与前置参数：已安装/自定义模式直接执行 pi-web 入口；
-/// 内置模式执行小妍自带的 node 并以 resources 内的 pi-web.js 作为前置参数。
+/// 一次 Pi 启动的程序与前置参数：本机模式直接执行 pi-web 入口；
+/// 私有安装模式执行下载的 node，并以同目录中的 pi-web.js 作为前置参数。
 #[derive(Debug, Clone)]
 pub struct PiWebLaunchSpec {
     pub program: PathBuf,
@@ -138,21 +138,23 @@ impl PiWebLaunchSpec {
 
 pub fn resolve_executable(config: &PiWebRuntimeConfig) -> Result<PathBuf, String> {
     match config.mode {
-        // Bundled 正常应经 PiWebRuntimeState::resolve_launch 解析
-        //（内置优先、缺失回退）；此处是绕过 state 直接调用时的兜底。
-        PiWebRuntimeMode::Bundled | PiWebRuntimeMode::Path => find_pi_web().ok_or_else(|| {
-            "未找到 Pi，请先执行 npm install -g @agegr/pi-web，或指定可执行文件".to_string()
-        }),
+        // Bundled 正常应经 PiWebRuntimeState::resolve_launch 解析；
+        // 此处是绕过 state 直接调用时的本机发现兜底。
+        PiWebRuntimeMode::Auto | PiWebRuntimeMode::Bundled | PiWebRuntimeMode::Path => {
+            find_pi_web().ok_or_else(|| {
+                "未找到本机 Pi，请使用小妍一键安装，或在高级设置中指定可执行文件".to_string()
+            })
+        }
         PiWebRuntimeMode::External => {
             let executable = config
                 .external_executable
                 .as_deref()
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-                .ok_or_else(|| "请先选择自定义 Pi 可执行文件".to_string())?;
+                .ok_or_else(|| "请先选择本机 Pi 可执行文件".to_string())?;
             let path = Path::new(executable);
             if path.components().count() > 1 && !path.is_file() {
-                return Err("自定义 Pi 可执行文件不存在".to_string());
+                return Err("本机 Pi 可执行文件不存在".to_string());
             }
             Ok(path.to_path_buf())
         }

@@ -1,3 +1,4 @@
+use crate::runtime_installer::{managed_runtime_dir, ManagedRuntimeProvider};
 use crate::{
     append_diagnostic_log,
     opencode_process::{
@@ -27,7 +28,8 @@ const OPENCODE_SOURCE: &str = "https://github.com/anomalyco/opencode";
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum OpenCodeRuntimeMode {
-    /// 小妍自带的内置运行时（resources/opencode），缺失时回退到已安装版本
+    Auto,
+    /// 小妍下载并维护的托管运行时
     Bundled,
     Path,
     External,
@@ -43,7 +45,7 @@ pub struct OpenCodeRuntimeConfig {
 impl Default for OpenCodeRuntimeConfig {
     fn default() -> Self {
         Self {
-            mode: OpenCodeRuntimeMode::Bundled,
+            mode: OpenCodeRuntimeMode::Auto,
             external_executable: None,
             workspace_dir: None,
         }
@@ -129,41 +131,41 @@ impl RuntimeInner {
 #[derive(Clone)]
 pub struct OpenCodeRuntimeState {
     app_data_dir: PathBuf,
-    resource_dir: Option<PathBuf>,
     inner: Arc<Mutex<RuntimeInner>>,
 }
 impl OpenCodeRuntimeState {
-    pub fn new(app_data_dir: PathBuf, resource_dir: Option<PathBuf>) -> Self {
-        let config = read_config(&app_data_dir).unwrap_or_default();
+    pub fn new(app_data_dir: PathBuf) -> Self {
+        let config = normalize_config(read_config(&app_data_dir).unwrap_or_default());
         Self {
             app_data_dir,
-            resource_dir,
             inner: Arc::new(Mutex::new(RuntimeInner::new(config))),
         }
     }
     fn config_path(&self) -> PathBuf {
         self.app_data_dir.join("opencode/runtime.json")
     }
-    /// 内置运行时：安装包 resources/opencode/runtime/bin 下的 opencode 二进制
+    /// 托管运行时：按需下载到应用数据目录，不进入安装包。
     fn bundled_executable(&self) -> Option<PathBuf> {
-        let binary = self
-            .resource_dir
-            .as_ref()?
-            .join("resources")
-            .join("opencode")
-            .join("runtime")
+        let binary = managed_runtime_dir(&self.app_data_dir, ManagedRuntimeProvider::Opencode)
             .join("bin")
-            .join(if cfg!(windows) { "opencode.exe" } else { "opencode" });
+            .join(if cfg!(windows) {
+                "opencode.exe"
+            } else {
+                "opencode"
+            });
         binary.is_file().then_some(binary)
     }
-    /// 内置模式：优先小妍自带二进制，缺失时回退到环境中已安装的官方版本
+    /// 自动模式优先本机版本，缺失时回退到小妍私有目录。
     fn resolve_mode_executable(&self, config: &OpenCodeRuntimeConfig) -> Result<PathBuf, String> {
-        if config.mode == OpenCodeRuntimeMode::Bundled {
-            return self.bundled_executable().or_else(find_opencode).ok_or_else(|| {
-                "未找到内置 OpenCode 运行时或已安装的 OpenCode。可执行 pnpm opencode:prepare-runtime 生成内置运行时，或按官方方式安装 OpenCode".to_string()
-            });
+        match config.mode {
+            OpenCodeRuntimeMode::Auto => find_opencode()
+                .or_else(|| self.bundled_executable())
+                .ok_or_else(|| "未找到本机 OpenCode，请先一键安装".to_string()),
+            OpenCodeRuntimeMode::Bundled => self
+                .bundled_executable()
+                .ok_or_else(|| "尚未安装 OpenCode 托管运行时，请先一键安装".to_string()),
+            OpenCodeRuntimeMode::Path | OpenCodeRuntimeMode::External => resolve_executable(config),
         }
-        resolve_executable(config)
     }
 }
 fn read_config(app_data_dir: &Path) -> Option<OpenCodeRuntimeConfig> {
@@ -180,6 +182,12 @@ fn write_config(path: &Path, config: &OpenCodeRuntimeConfig) -> Result<(), Strin
         .map_err(|error| format!("保存 OpenCode 配置失败：{error}"))
 }
 fn normalize_config(mut config: OpenCodeRuntimeConfig) -> OpenCodeRuntimeConfig {
+    if matches!(
+        config.mode,
+        OpenCodeRuntimeMode::Bundled | OpenCodeRuntimeMode::Path
+    ) {
+        config.mode = OpenCodeRuntimeMode::Auto;
+    }
     config.external_executable = config
         .external_executable
         .map(|value| value.trim().to_string())
@@ -190,7 +198,10 @@ fn normalize_config(mut config: OpenCodeRuntimeConfig) -> OpenCodeRuntimeConfig 
         .filter(|value| !value.is_empty());
     config
 }
-fn validate_config(state: &OpenCodeRuntimeState, config: &OpenCodeRuntimeConfig) -> Result<(), String> {
+fn validate_config(
+    state: &OpenCodeRuntimeState,
+    config: &OpenCodeRuntimeConfig,
+) -> Result<(), String> {
     if let Some(workspace) = config.workspace_dir.as_deref() {
         if !Path::new(workspace).is_dir() {
             return Err("所选工作目录不存在或不是文件夹".to_string());
@@ -199,7 +210,10 @@ fn validate_config(state: &OpenCodeRuntimeState, config: &OpenCodeRuntimeConfig)
     if config.mode == OpenCodeRuntimeMode::External {
         resolve_executable(config)?;
     }
-    if config.mode == OpenCodeRuntimeMode::Bundled {
+    if matches!(
+        config.mode,
+        OpenCodeRuntimeMode::Auto | OpenCodeRuntimeMode::Bundled
+    ) {
         state.resolve_mode_executable(config)?;
     }
     Ok(())
@@ -225,7 +239,9 @@ async fn snapshot(state: &OpenCodeRuntimeState) -> OpenCodeRuntimeSnapshot {
         url: inner.url.clone(),
         error: inner.error.clone(),
         logs: inner.logs.iter().cloned().collect(),
-        bundled_executable: state.bundled_executable().map(|path| path.display().to_string()),
+        bundled_executable: state
+            .bundled_executable()
+            .map(|path| path.display().to_string()),
         bundled_available: state.bundled_executable().is_some(),
         path_available: path_available(),
         path_executable: find_opencode().map(|path| path.display().to_string()),
@@ -396,7 +412,7 @@ pub async fn opencode_runtime_stop(
 pub async fn opencode_runtime_validate_external(executable: String) -> Result<String, String> {
     let executable = executable.trim();
     if executable.is_empty() {
-        return Err("请先选择自定义 OpenCode 可执行文件".to_string());
+        return Err("请先选择本机 OpenCode 可执行文件".to_string());
     }
     validate_secure_version(Path::new(executable)).await
 }
@@ -405,10 +421,21 @@ pub async fn opencode_runtime_validate_external(executable: String) -> Result<St
 mod tests {
     use super::*;
     #[test]
-    fn default_runtime_uses_bundled_mode() {
+    fn default_runtime_uses_auto_mode() {
         assert_eq!(
             OpenCodeRuntimeConfig::default().mode,
-            OpenCodeRuntimeMode::Bundled
+            OpenCodeRuntimeMode::Auto
         );
+    }
+
+    #[test]
+    fn legacy_modes_migrate_to_auto() {
+        for mode in [OpenCodeRuntimeMode::Bundled, OpenCodeRuntimeMode::Path] {
+            let config = normalize_config(OpenCodeRuntimeConfig {
+                mode,
+                ..OpenCodeRuntimeConfig::default()
+            });
+            assert_eq!(config.mode, OpenCodeRuntimeMode::Auto);
+        }
     }
 }

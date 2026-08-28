@@ -1,4 +1,4 @@
-export type PiWebRuntimeMode = "bundled" | "path" | "external";
+export type PiWebRuntimeMode = "auto" | "bundled" | "path" | "external";
 export type PiWebRuntimePhase = "stopped" | "starting" | "running" | "failed";
 
 export interface PiWebRuntimeConfig {
@@ -23,7 +23,7 @@ export interface PiWebRuntimeSnapshot {
 }
 
 export const DEFAULT_PI_WEB_CONFIG: PiWebRuntimeConfig = {
-  mode: "bundled",
+  mode: "auto",
   externalExecutable: null,
   agentDir: null,
   workspaceDir: null,

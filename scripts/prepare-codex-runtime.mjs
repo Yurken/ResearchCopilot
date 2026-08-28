@@ -42,7 +42,7 @@ function gitOutput(commandArgs) {
 }
 
 // 与 prepare-dsh-runtime 一致的固定版本验证：submodule 指针必须与 manifest 提交一致，
-// 升级内置运行时必须先更新 vendor/codex-harness 并同步本 manifest。
+// 升级托管运行时必须先更新 vendor/codex-harness 并同步本 manifest。
 function verifyPin() {
   if (!existsSync(join(sourceRoot, "codex-rs", "Cargo.toml"))) {
     fail("Codex Harness submodule is missing; run git submodule update --init --recursive");

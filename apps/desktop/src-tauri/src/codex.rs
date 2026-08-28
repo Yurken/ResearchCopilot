@@ -6,6 +6,7 @@ use crate::codex_process::{
 };
 use crate::codex_web::{self, CodexWebServer};
 use crate::dsh_api_config::resolve_xiaoyan_api;
+use crate::runtime_installer::{managed_runtime_dir, ManagedRuntimeProvider};
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -28,7 +29,9 @@ const CODEX_SOURCE: &str = "https://github.com/openai/codex";
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CodexRuntimeMode {
-    /// 小妍自带的内置运行时（resources/codex），缺失时回退到已安装版本
+    /// 自动优先使用本机版本，缺失时使用小妍托管版本
+    Auto,
+    /// 小妍下载并维护的托管运行时
     Bundled,
     Path,
     External,
@@ -46,7 +49,7 @@ pub struct CodexRuntimeConfig {
 impl Default for CodexRuntimeConfig {
     fn default() -> Self {
         Self {
-            mode: CodexRuntimeMode::Bundled,
+            mode: CodexRuntimeMode::Auto,
             external_executable: None,
             external_home: None,
             workspace_dir: None,
@@ -145,16 +148,14 @@ impl RuntimeInner {
 #[derive(Clone)]
 pub struct CodexRuntimeState {
     app_data_dir: PathBuf,
-    resource_dir: Option<PathBuf>,
     inner: Arc<Mutex<RuntimeInner>>,
 }
 
 impl CodexRuntimeState {
-    pub fn new(app_data_dir: PathBuf, resource_dir: Option<PathBuf>) -> Self {
-        let config = read_config(&app_data_dir).unwrap_or_default();
+    pub fn new(app_data_dir: PathBuf) -> Self {
+        let config = normalize_config(read_config(&app_data_dir).unwrap_or_default());
         Self {
             app_data_dir,
-            resource_dir,
             inner: Arc::new(Mutex::new(RuntimeInner::new(config))),
         }
     }
@@ -164,26 +165,24 @@ impl CodexRuntimeState {
     fn isolated_home(&self) -> PathBuf {
         self.app_data_dir.join("codex/home")
     }
-    /// 内置运行时：安装包 resources/codex/runtime/bin 下的 codex 二进制
+    /// 托管运行时：按需下载到应用数据目录，不进入安装包。
     fn bundled_executable(&self) -> Option<PathBuf> {
-        let binary = self
-            .resource_dir
-            .as_ref()?
-            .join("resources")
-            .join("codex")
-            .join("runtime")
+        let binary = managed_runtime_dir(&self.app_data_dir, ManagedRuntimeProvider::Codex)
             .join("bin")
             .join(if cfg!(windows) { "codex.exe" } else { "codex" });
         binary.is_file().then_some(binary)
     }
-    /// 内置模式：优先小妍自带二进制，缺失时回退到环境中已安装的官方版本
+    /// 自动模式优先本机版本，缺失时回退到小妍私有目录。
     fn resolve_mode_executable(&self, config: &CodexRuntimeConfig) -> Result<PathBuf, String> {
-        if config.mode == CodexRuntimeMode::Bundled {
-            return self.bundled_executable().or_else(find_codex).ok_or_else(|| {
-                "未找到内置 Codex 运行时或已安装的官方 Codex Harness。可执行 pnpm codex:prepare-runtime 生成内置运行时，或按官方方式安装 Codex".to_string()
-            });
+        match config.mode {
+            CodexRuntimeMode::Auto => find_codex()
+                .or_else(|| self.bundled_executable())
+                .ok_or_else(|| "未找到本机 Codex，请先一键安装".to_string()),
+            CodexRuntimeMode::Bundled => self
+                .bundled_executable()
+                .ok_or_else(|| "尚未安装 Codex 托管运行时，请先一键安装".to_string()),
+            CodexRuntimeMode::Path | CodexRuntimeMode::External => resolve_executable(config),
         }
-        resolve_executable(config)
     }
     fn data_home(&self, config: &CodexRuntimeConfig) -> PathBuf {
         config
@@ -214,6 +213,12 @@ fn default_user_codex_home() -> Option<PathBuf> {
         .map(|home| home.join(".codex"))
 }
 fn normalize_config(mut config: CodexRuntimeConfig) -> CodexRuntimeConfig {
+    if matches!(
+        config.mode,
+        CodexRuntimeMode::Bundled | CodexRuntimeMode::Path
+    ) {
+        config.mode = CodexRuntimeMode::Auto;
+    }
     config.external_executable = config
         .external_executable
         .map(|value| value.trim().to_string())
@@ -241,7 +246,10 @@ fn validate_config(state: &CodexRuntimeState, config: &CodexRuntimeConfig) -> Re
     if config.mode == CodexRuntimeMode::External {
         resolve_executable(config)?;
     }
-    if config.mode == CodexRuntimeMode::Bundled {
+    if matches!(
+        config.mode,
+        CodexRuntimeMode::Auto | CodexRuntimeMode::Bundled
+    ) {
         state.resolve_mode_executable(config)?;
     }
     Ok(())
@@ -272,7 +280,9 @@ async fn snapshot(state: &CodexRuntimeState) -> CodexRuntimeSnapshot {
         url: inner.url.clone(),
         error: inner.error.clone(),
         logs: inner.logs.iter().cloned().collect(),
-        bundled_executable: state.bundled_executable().map(|path| path.display().to_string()),
+        bundled_executable: state
+            .bundled_executable()
+            .map(|path| path.display().to_string()),
         bundled_available: state.bundled_executable().is_some(),
         path_available: path_available(),
         path_executable: find_codex().map(|path| path.display().to_string()),
@@ -459,7 +469,7 @@ pub async fn codex_runtime_stop(
 pub async fn codex_runtime_validate_external(executable: String) -> Result<String, String> {
     let executable = executable.trim();
     if executable.is_empty() {
-        return Err("请先选择自定义 Codex 可执行文件".to_string());
+        return Err("请先选择本机 Codex 可执行文件".to_string());
     }
     let output = timeout(
         Duration::from_secs(8),
@@ -468,19 +478,19 @@ pub async fn codex_runtime_validate_external(executable: String) -> Result<Strin
             .output(),
     )
     .await
-    .map_err(|_| "自定义 Codex 版本检查超时".to_string())?
-    .map_err(|error| format!("无法执行自定义 Codex：{error}"))?;
+    .map_err(|_| "本机 Codex 版本检查超时".to_string())?
+    .map_err(|error| format!("无法执行本机 Codex：{error}"))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if stderr.is_empty() {
-            format!("自定义 Codex 版本检查失败（{}）", output.status)
+            format!("本机 Codex 版本检查失败（{}）", output.status)
         } else {
             stderr
         });
     }
     let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if version.is_empty() {
-        Err("自定义 Codex 未返回版本号".to_string())
+        Err("本机 Codex 未返回版本号".to_string())
     } else {
         Ok(version)
     }
@@ -511,7 +521,18 @@ pub async fn codex_runtime_import_xiaoyan_api(
 mod tests {
     use super::*;
     #[test]
-    fn default_runtime_uses_bundled_mode() {
-        assert_eq!(CodexRuntimeConfig::default().mode, CodexRuntimeMode::Bundled);
+    fn default_runtime_uses_auto_mode() {
+        assert_eq!(CodexRuntimeConfig::default().mode, CodexRuntimeMode::Auto);
+    }
+
+    #[test]
+    fn legacy_modes_migrate_to_auto() {
+        for mode in [CodexRuntimeMode::Bundled, CodexRuntimeMode::Path] {
+            let config = normalize_config(CodexRuntimeConfig {
+                mode,
+                ..CodexRuntimeConfig::default()
+            });
+            assert_eq!(config.mode, CodexRuntimeMode::Auto);
+        }
     }
 }

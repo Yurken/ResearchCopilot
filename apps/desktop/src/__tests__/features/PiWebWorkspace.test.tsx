@@ -9,7 +9,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args: unknown[]) => invokeM
 
 const stopped: PiWebRuntimeSnapshot = {
   phase: "stopped",
-  config: { mode: "path", externalExecutable: null, agentDir: null, workspaceDir: null },
+  config: { mode: "auto", externalExecutable: null, agentDir: null, workspaceDir: null },
   url: null,
   error: null,
   logs: [],
@@ -30,16 +30,16 @@ describe("PiWebWorkspace", () => {
   it("shows Pi launch controls and the discovered executable", async () => {
     render(<PiWebWorkspace />);
     expect(await screen.findByRole("heading", { name: "启动 Pi" })).toBeInTheDocument();
-    expect(screen.getByText("内置 Pi")).toBeInTheDocument();
+    expect(screen.getByText("已发现本机 Pi")).toBeInTheDocument();
     expect(await screen.findByText(/\/opt\/homebrew\/bin\/pi-web/)).toBeInTheDocument();
   });
 
   it("starts an externally selected Pi runtime", async () => {
     const user = userEvent.setup();
     render(<PiWebWorkspace />);
-    await screen.findByText("已安装 Pi");
-    await user.click(screen.getByRole("button", { name: /自定义 Pi/ }));
-    await user.type(screen.getByLabelText("pi-web 可执行文件"), "/usr/local/bin/pi-web");
+    await screen.findByText("已发现本机 Pi");
+    await user.click(screen.getByText("高级设置"));
+    await user.type(screen.getByRole("textbox", { name: /使用其他本机 Pi/ }), "/usr/local/bin/pi-web");
     await user.click(screen.getByRole("button", { name: "启动 Pi" }));
     await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("pi_web_runtime_configure", {
       config: expect.objectContaining({ mode: "external", externalExecutable: "/usr/local/bin/pi-web" }),

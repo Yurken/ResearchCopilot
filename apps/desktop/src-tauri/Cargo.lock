@@ -7479,6 +7479,7 @@ dependencies = [
  "serde_yaml",
  "sha2",
  "sqlx",
+ "tar",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

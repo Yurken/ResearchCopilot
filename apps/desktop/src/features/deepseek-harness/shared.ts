@@ -1,4 +1,4 @@
-export type DshRuntimeMode = "bundled" | "external";
+export type DshRuntimeMode = "auto" | "bundled" | "external";
 export type DshRuntimePhase = "stopped" | "starting" | "running" | "failed";
 
 export interface DshRuntimeConfig {
@@ -16,6 +16,8 @@ export interface DshRuntimeSnapshot {
   error: string | null;
   logs: string[];
   bundledAvailable: boolean;
+  pathAvailable: boolean;
+  pathExecutable: string | null;
   lockedVersion: string;
   lockedCommit: string;
   nodeRequirement: string;
@@ -31,7 +33,7 @@ export interface DshApiImportResult {
 }
 
 export const DEFAULT_DSH_CONFIG: DshRuntimeConfig = {
-  mode: "bundled",
+  mode: "auto",
   externalExecutable: null,
   externalHome: null,
   profile: "web",

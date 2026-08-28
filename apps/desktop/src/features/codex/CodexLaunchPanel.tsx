@@ -8,51 +8,10 @@ import {
   Play,
 } from "lucide-react";
 import { Button, Card, Input } from "@research-copilot/ui";
-import type { CodexRuntimeConfig, CodexRuntimeMode } from "./shared";
+import type { CodexRuntimeConfig } from "./shared";
 import type { useCodexRuntime } from "./useCodexRuntime";
-
-function RuntimeModeOption({
-  mode,
-  active,
-  title,
-  description,
-  onSelect,
-}: {
-  mode: CodexRuntimeMode;
-  active: boolean;
-  title: string;
-  description: string;
-  onSelect: (mode: CodexRuntimeMode) => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={() => onSelect(mode)}
-      aria-pressed={active}
-      className="flex min-w-0 items-center gap-3 rounded-2xl px-3.5 py-3 text-left transition-all duration-150 active:scale-[0.99]"
-      style={{
-        background: active ? "var(--rc-elevated)" : "transparent",
-        border: active ? "1px solid var(--rc-border-strong)" : "1px solid transparent",
-        boxShadow: active ? "var(--rc-card-flat-shadow)" : "none",
-      }}
-    >
-      <span
-        className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full"
-        style={{
-          background: active ? "var(--rc-accent)" : "var(--rc-chip-inset-bg)",
-          color: active ? "white" : "transparent",
-          boxShadow: "var(--rc-chip-inset-shadow)",
-        }}
-      >
-        <Check className="h-3 w-3" />
-      </span>
-      <span className="min-w-0">
-        <span className="block text-sm font-semibold text-ink-primary">{title}</span>
-        <span className="mt-0.5 block text-xs leading-4 text-ink-tertiary">{description}</span>
-      </span>
-    </button>
-  );
-}
+import RuntimeExecutableSettings from "../code-harness/RuntimeExecutableSettings";
+import RuntimeSourceSummary from "../code-harness/RuntimeSourceSummary";
 
 export default function CodexLaunchPanel({
   runtime,
@@ -66,16 +25,19 @@ export default function CodexLaunchPanel({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [externalVersion, setExternalVersion] = useState("");
   const phase = runtime.snapshot?.phase ?? "stopped";
-  const canStart =
-    draft.mode === "bundled"
-      ? Boolean(runtime.snapshot?.bundledAvailable || runtime.snapshot?.pathAvailable)
-      : draft.mode === "path"
-        ? Boolean(runtime.snapshot?.pathAvailable)
-        : Boolean(draft.externalExecutable?.trim());
+  const usingCustom = draft.mode === "external" && Boolean(draft.externalExecutable?.trim());
+  const canStart = usingCustom
+    ? true
+    : Boolean(runtime.snapshot?.pathAvailable || runtime.snapshot?.bundledAvailable);
+
+  const setLocalExecutable = (value: string | null) => {
+    onDraftChange("externalExecutable", value);
+    onDraftChange("mode", value?.trim() ? "external" : "auto");
+  };
 
   const pickExecutable = async () => {
     const selected = await runtime.chooseFile("选择 codex 可执行文件");
-    if (selected) onDraftChange("externalExecutable", selected);
+    if (selected) setLocalExecutable(selected);
   };
 
   const pickDirectory = async (key: "workspaceDir" | "externalHome", title: string) => {
@@ -97,86 +59,26 @@ export default function CodexLaunchPanel({
       <div className="mx-auto max-w-4xl">
         <div className="mb-5">
           <h2 className="text-xl font-semibold tracking-[-0.02em] text-ink-primary">启动 Codex</h2>
-          <p className="mt-1.5 text-sm text-ink-tertiary">选择运行环境和工作目录，然后进入小妍 Codex Web。</p>
+          <p className="mt-1.5 text-sm text-ink-tertiary">确认自动发现的运行环境和工作目录，然后进入小妍 Codex Web。</p>
         </div>
 
         <Card padding="lg" className="overflow-hidden">
           <div>
             <h3 className="text-sm font-semibold text-ink-primary">运行环境</h3>
-            <p className="mt-1 text-xs leading-5 text-ink-tertiary">使用官方 app-server 协议，由小妍提供独立 Web 页面、进程和本地容器。</p>
+            <p className="mt-1 text-xs leading-5 text-ink-tertiary">自动优先使用本机 Codex；未找到时可一键安装到小妍私有目录。</p>
           </div>
 
-          <div className="mt-4 grid gap-1 rounded-[22px] p-1 sm:grid-cols-3" style={{ background: "var(--rc-chip-inset-bg)", boxShadow: "var(--rc-chip-inset-shadow)" }}>
-            <RuntimeModeOption
-              mode="bundled"
-              active={draft.mode === "bundled"}
-              title="内置 Codex"
-              description="小妍自带的官方 harness，无需安装"
-              onSelect={(mode) => onDraftChange("mode", mode)}
-            />
-            <RuntimeModeOption
-              mode="path"
-              active={draft.mode === "path"}
-              title="已安装 Codex"
-              description="自动发现环境中已安装的官方 harness"
-              onSelect={(mode) => onDraftChange("mode", mode)}
-            />
-            <RuntimeModeOption
-              mode="external"
-              active={draft.mode === "external"}
-              title="自定义 Codex"
-              description="手动指定自行维护的可执行文件"
-              onSelect={(mode) => onDraftChange("mode", mode)}
-            />
-          </div>
-
-          {draft.mode === "bundled" && !runtime.snapshot?.bundledAvailable && (
-            <div className="mt-4 flex gap-2.5 rounded-2xl border border-amber-700/15 bg-amber-50/60 px-3.5 py-3 text-amber-900">
-              <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
-              <p className="text-xs leading-5">
-                {runtime.snapshot?.pathAvailable
-                  ? "当前构建未包含内置 Codex 运行时，将回退到已安装版本。可执行 pnpm codex:prepare-runtime 生成内置运行时。"
-                  : "当前构建未包含内置 Codex 运行时，也未在环境中发现已安装版本。可执行 pnpm codex:prepare-runtime 生成内置运行时，或执行 `brew install --cask codex` / `npm i -g @openai/codex`。"}
-              </p>
-            </div>
-          )}
-
-          {draft.mode === "path" && !runtime.snapshot?.pathAvailable && (
-            <div className="mt-4 flex gap-2.5 rounded-2xl border border-amber-700/15 bg-amber-50/60 px-3.5 py-3 text-amber-900">
-              <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
-              <p className="text-xs leading-5">未找到官方 Codex Harness。可执行 `brew install --cask codex` 或 `npm i -g @openai/codex`，或改为自定义可执行文件。</p>
-            </div>
-          )}
-
-          {draft.mode === "bundled" && runtime.snapshot?.bundledExecutable && (
-            <p className="mt-3 text-xs text-ink-tertiary">内置运行时 {runtime.snapshot.bundledExecutable}</p>
-          )}
-
-          {draft.mode === "path" && runtime.snapshot?.pathExecutable && (
-            <p className="mt-3 text-xs text-ink-tertiary">已发现 {runtime.snapshot.pathExecutable}</p>
-          )}
-
-          {draft.mode === "external" && (
-            <div className="mt-4 space-y-2">
-              <label className="text-xs font-medium text-ink-secondary" htmlFor="codex-executable">codex 可执行文件</label>
-              <div className="flex gap-2">
-                <Input
-                  id="codex-executable"
-                  value={draft.externalExecutable ?? ""}
-                  onChange={(event) => onDraftChange("externalExecutable", event.target.value || null)}
-                  placeholder="/path/to/codex"
-                  className="min-w-0 flex-1"
-                />
-                <Button variant="secondary" onClick={() => void pickExecutable()} aria-label="选择 codex 可执行文件">
-                  <FolderOpen className="h-4 w-4" />
-                </Button>
-                <Button variant="ghost" onClick={() => void validateExternal()} disabled={!draft.externalExecutable || runtime.busy}>
-                  检查
-                </Button>
-              </div>
-              {externalVersion && <p className="text-xs font-medium text-emerald-700">已识别 Codex {externalVersion}</p>}
-            </div>
-          )}
+          <RuntimeSourceSummary
+            provider="codex"
+            label="Codex"
+            usingCustom={usingCustom}
+            customExecutable={draft.externalExecutable}
+            pathAvailable={Boolean(runtime.snapshot?.pathAvailable)}
+            pathExecutable={runtime.snapshot?.pathExecutable ?? null}
+            managedAvailable={Boolean(runtime.snapshot?.bundledAvailable)}
+            managedExecutable={runtime.snapshot?.bundledExecutable}
+            onInstalled={runtime.refresh}
+          />
 
           <div className="mt-5 space-y-2">
             <label className="text-xs font-medium text-ink-secondary" htmlFor="codex-workspace">工作目录</label>
@@ -229,7 +131,19 @@ export default function CodexLaunchPanel({
 
           <div className={`grid transition-[grid-template-rows] duration-200 ${advancedOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
             <div className="overflow-hidden">
-              <div className="space-y-2 pt-4">
+              <div className="space-y-4 pt-4">
+                <RuntimeExecutableSettings
+                  id="codex-executable"
+                  label="Codex"
+                  value={usingCustom ? draft.externalExecutable : null}
+                  detectedExecutable={runtime.snapshot?.pathExecutable}
+                  validationResult={externalVersion ? `已识别 Codex ${externalVersion}` : ""}
+                  busy={runtime.busy}
+                  onChange={setLocalExecutable}
+                  onPick={() => void pickExecutable()}
+                  onValidate={() => void validateExternal()}
+                  onUseAuto={() => setLocalExecutable(null)}
+                />
                 <label className="text-xs font-medium text-ink-secondary" htmlFor="codex-home">CODEX_HOME</label>
                 <div className="flex gap-2">
                   <Input

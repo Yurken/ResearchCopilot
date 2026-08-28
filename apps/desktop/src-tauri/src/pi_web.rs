@@ -1,3 +1,4 @@
+use crate::runtime_installer::{managed_runtime_dir, ManagedRuntimeProvider};
 use crate::{
     append_diagnostic_log,
     pi_web_process::{
@@ -27,7 +28,8 @@ const PI_WEB_SOURCE: &str = "https://github.com/agegr/pi-web";
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PiWebRuntimeMode {
-    /// 小妍自带的内置运行时（resources/pi-web），缺失时回退到已安装版本
+    Auto,
+    /// 小妍下载并维护的托管运行时
     Bundled,
     Path,
     External,
@@ -45,7 +47,7 @@ pub struct PiWebRuntimeConfig {
 impl Default for PiWebRuntimeConfig {
     fn default() -> Self {
         Self {
-            mode: PiWebRuntimeMode::Bundled,
+            mode: PiWebRuntimeMode::Auto,
             external_executable: None,
             agent_dir: None,
             workspace_dir: None,
@@ -136,16 +138,14 @@ impl RuntimeInner {
 #[derive(Clone)]
 pub struct PiWebRuntimeState {
     app_data_dir: PathBuf,
-    resource_dir: Option<PathBuf>,
     inner: Arc<Mutex<RuntimeInner>>,
 }
 
 impl PiWebRuntimeState {
-    pub fn new(app_data_dir: PathBuf, resource_dir: Option<PathBuf>) -> Self {
-        let config = read_config(&app_data_dir).unwrap_or_default();
+    pub fn new(app_data_dir: PathBuf) -> Self {
+        let config = normalize_config(read_config(&app_data_dir).unwrap_or_default());
         Self {
             app_data_dir,
-            resource_dir,
             inner: Arc::new(Mutex::new(RuntimeInner::new(config))),
         }
     }
@@ -154,14 +154,9 @@ impl PiWebRuntimeState {
         self.app_data_dir.join("pi-web/runtime.json")
     }
 
-    /// 内置运行时：安装包 resources/pi-web/runtime 下的 node 与 pi-web.js 入口
+    /// 托管运行时：按需下载到应用数据目录，不进入安装包。
     fn bundled_launch(&self) -> Option<PiWebLaunchSpec> {
-        let runtime = self
-            .resource_dir
-            .as_ref()?
-            .join("resources")
-            .join("pi-web")
-            .join("runtime");
+        let runtime = managed_runtime_dir(&self.app_data_dir, ManagedRuntimeProvider::PiWeb);
         let node = runtime.join(if cfg!(windows) { "node.exe" } else { "node" });
         let entry = runtime.join("bin").join("pi-web.js");
         if node.is_file() && entry.is_file() {
@@ -173,17 +168,20 @@ impl PiWebRuntimeState {
         }
     }
 
-    /// 内置模式：优先小妍自带运行时，缺失时回退到环境中已安装的官方版本
+    /// 自动模式优先本机版本，缺失时回退到小妍私有目录。
     fn resolve_launch(&self, config: &PiWebRuntimeConfig) -> Result<PiWebLaunchSpec, String> {
-        if config.mode == PiWebRuntimeMode::Bundled {
-            if let Some(spec) = self.bundled_launch() {
-                return Ok(spec);
+        match config.mode {
+            PiWebRuntimeMode::Auto => find_pi_web()
+                .map(PiWebLaunchSpec::direct)
+                .or_else(|| self.bundled_launch())
+                .ok_or_else(|| "未找到本机 Pi，请先一键安装".to_string()),
+            PiWebRuntimeMode::Bundled => self
+                .bundled_launch()
+                .ok_or_else(|| "尚未安装 Pi 托管运行时，请先一键安装".to_string()),
+            PiWebRuntimeMode::Path | PiWebRuntimeMode::External => {
+                resolve_executable(config).map(PiWebLaunchSpec::direct)
             }
-            return find_pi_web().map(PiWebLaunchSpec::direct).ok_or_else(|| {
-                "未找到内置 Pi 运行时或已安装的 Pi。可执行 pnpm pi-web:prepare-runtime 生成内置运行时，或执行 npm install -g @agegr/pi-web".to_string()
-            });
         }
-        resolve_executable(config).map(PiWebLaunchSpec::direct)
     }
 
     fn data_home(&self, config: &PiWebRuntimeConfig) -> PathBuf {
@@ -213,11 +211,16 @@ fn write_config(path: &Path, config: &PiWebRuntimeConfig) -> Result<(), String> 
     }
     let content = serde_json::to_string_pretty(config)
         .map_err(|error| format!("序列化 Pi 配置失败：{error}"))?;
-    fs::write(path, format!("{content}\n"))
-        .map_err(|error| format!("保存 Pi 配置失败：{error}"))
+    fs::write(path, format!("{content}\n")).map_err(|error| format!("保存 Pi 配置失败：{error}"))
 }
 
 fn normalize_config(mut config: PiWebRuntimeConfig) -> PiWebRuntimeConfig {
+    if matches!(
+        config.mode,
+        PiWebRuntimeMode::Bundled | PiWebRuntimeMode::Path
+    ) {
+        config.mode = PiWebRuntimeMode::Auto;
+    }
     config.external_executable = normalize_optional(config.external_executable);
     config.agent_dir = normalize_optional(config.agent_dir);
     config.workspace_dir = normalize_optional(config.workspace_dir);
@@ -244,7 +247,10 @@ fn validate_config(state: &PiWebRuntimeState, config: &PiWebRuntimeConfig) -> Re
     if config.mode == PiWebRuntimeMode::External {
         resolve_executable(config)?;
     }
-    if config.mode == PiWebRuntimeMode::Bundled {
+    if matches!(
+        config.mode,
+        PiWebRuntimeMode::Auto | PiWebRuntimeMode::Bundled
+    ) {
         state.resolve_launch(config)?;
     }
     Ok(())
@@ -258,8 +264,7 @@ fn workspace_dir(
         return Ok(PathBuf::from(path));
     }
     let fallback = state.app_data_dir.join("pi-web/workspace");
-    fs::create_dir_all(&fallback)
-        .map_err(|error| format!("创建默认 Pi 工作目录失败：{error}"))?;
+    fs::create_dir_all(&fallback).map_err(|error| format!("创建默认 Pi 工作目录失败：{error}"))?;
     Ok(fallback)
 }
 
@@ -272,9 +277,11 @@ async fn snapshot(state: &PiWebRuntimeState) -> PiWebRuntimeSnapshot {
         url: inner.url.clone(),
         error: inner.error.clone(),
         logs: inner.logs.iter().cloned().collect(),
-        bundled_executable: state
-            .bundled_launch()
-            .and_then(|spec| spec.prefix_args.first().map(|path| path.display().to_string())),
+        bundled_executable: state.bundled_launch().and_then(|spec| {
+            spec.prefix_args
+                .first()
+                .map(|path| path.display().to_string())
+        }),
         bundled_available: state.bundled_launch().is_some(),
         path_available: path_available(),
         path_executable: find_pi_web().map(|path| path.display().to_string()),
@@ -408,8 +415,7 @@ pub async fn pi_web_runtime_start(
             let mut inner = state.inner.lock().await;
             inner.phase = PiWebPhase::Failed;
             inner.url = None;
-            inner.error =
-                Some("Pi 启动超时，请确认 Node.js 已升级到 22.19 或更高版本".to_string());
+            inner.error = Some("Pi 启动超时，请确认 Node.js 已升级到 22.19 或更高版本".to_string());
             inner.child.take()
         };
         if let Some(child) = child {
@@ -455,8 +461,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_runtime_uses_bundled_mode() {
-        assert_eq!(PiWebRuntimeConfig::default().mode, PiWebRuntimeMode::Bundled);
+    fn default_runtime_uses_auto_mode() {
+        assert_eq!(PiWebRuntimeConfig::default().mode, PiWebRuntimeMode::Auto);
+    }
+
+    #[test]
+    fn legacy_modes_migrate_to_auto() {
+        for mode in [PiWebRuntimeMode::Bundled, PiWebRuntimeMode::Path] {
+            let config = normalize_config(PiWebRuntimeConfig {
+                mode,
+                ..PiWebRuntimeConfig::default()
+            });
+            assert_eq!(config.mode, PiWebRuntimeMode::Auto);
+        }
     }
 
     #[test]

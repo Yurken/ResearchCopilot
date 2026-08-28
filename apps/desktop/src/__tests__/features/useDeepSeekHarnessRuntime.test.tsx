@@ -7,7 +7,7 @@ import type { DshRuntimeSnapshot } from "../../features/deepseek-harness/shared"
 const stoppedSnapshot: DshRuntimeSnapshot = {
   phase: "stopped",
   config: {
-    mode: "bundled",
+    mode: "auto",
     externalExecutable: null,
     externalHome: null,
     profile: "web",
@@ -17,6 +17,8 @@ const stoppedSnapshot: DshRuntimeSnapshot = {
   error: null,
   logs: [],
   bundledAvailable: true,
+  pathAvailable: false,
+  pathExecutable: null,
   lockedVersion: "0.1.0-rc.5",
   lockedCommit: "47f943859bef60e4160492346772ded9b24f765a",
   nodeRequirement: "^22.19.0 || >=24.0.0",

@@ -1,10 +1,10 @@
 # Codex Web 接入
 
-小妍的 Codex 页面由两部分组成：官方 `codex app-server` 负责线程与执行内核，小妍内置的静态 Web 页面负责交互。桌面端只管理进程、loopback 服务和 iframe，不复制 Codex 内核。
+小妍的 Codex 页面由两部分组成：官方 `codex app-server` 负责线程与执行内核，小妍的静态 Web 页面负责交互。桌面端只管理进程、loopback 服务和 iframe，不复制 Codex 内核。
 
 ## 运行结构
 
-1. Rust 运行时从 `PATH`、常见安装目录或用户指定路径查找 `codex`。
+1. 小妍优先从 `PATH` 和常见安装目录发现本机 `codex`；未找到时可一键安装到小妍私有目录，手动路径位于高级设置。
 2. 启动 `codex app-server --listen ws://127.0.0.1:<random-port>`。
 3. 同时启动仅监听 `127.0.0.1` 的小妍静态 Web 服务。
 4. iframe 加载静态页面；页面按官方 JSON-RPC 协议连接 app-server。
