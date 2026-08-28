@@ -1,3 +1,5 @@
+
+
 <p align="center">
   <img src="apps/desktop/public/xiaoyan_poster.png" alt="小妍 — AI 科研工作台" width="760" />
 </p>
@@ -92,7 +94,7 @@ pnpm dev:desktop
 pnpm type-check       # 全工作区类型检查
 pnpm lint             # 全工作区 lint
 pnpm test             # 单元与组件测试
-pnpm test:e2e         # 桌面端端到端测试
+pnpm test:e2e         # 桌面端端到端测试（首次运行需安装 Playwright 浏览器：`pnpm --dir apps/desktop exec playwright install --with-deps`）
 pnpm build:desktop    # 构建桌面应用
 pnpm harness:sources:update # 更新四套 Harness 的官方源码指针
 ```
