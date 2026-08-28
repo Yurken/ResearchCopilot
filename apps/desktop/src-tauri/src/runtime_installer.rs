@@ -13,6 +13,7 @@ use tokio::{process::Command, sync::Mutex};
 
 const NODE_VERSION: &str = "22.19.0";
 const NODE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const INSTALL_COMMAND_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 #[derive(Debug, Clone, Copy, Deserialize, Eq, Hash, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -115,19 +116,25 @@ fn node_platform_name() -> Result<&'static str, String> {
 }
 
 fn validate_managed_dir(runtime_dir: &Path, app_data_dir: &Path) -> Result<(), String> {
-    let expected = app_data_dir
-        .canonicalize()
-        .unwrap_or_else(|_| app_data_dir.to_path_buf())
-        .join("managed-runtimes");
-    let parent = runtime_dir
+    if runtime_dir.file_name() != Some(OsStr::new("runtime")) {
+        return Err("运行时目录结构无效".to_string());
+    }
+    let provider_dir = runtime_dir
         .parent()
         .ok_or_else(|| "运行时目录无效".to_string())?;
-    let canonical_parent = parent.canonicalize().unwrap_or_else(|_| parent.to_path_buf());
-    if !canonical_parent.starts_with(&expected) {
+    // canonicalize 只对已存在的目录生效；两侧要么都规范化、要么都不规范
+    // 化，避免 /var 与 /private/var 这类前缀不一致导致的误判。
+    let canonical_provider = provider_dir.canonicalize().ok();
+    let expected = match &canonical_provider {
+        Some(_) => app_data_dir
+            .canonicalize()
+            .unwrap_or_else(|_| app_data_dir.to_path_buf())
+            .join("managed-runtimes"),
+        None => app_data_dir.to_path_buf().join("managed-runtimes"),
+    };
+    let actual = canonical_provider.unwrap_or_else(|| provider_dir.to_path_buf());
+    if !actual.starts_with(&expected) {
         return Err("运行时目录不在应用数据目录下".to_string());
-    }
-    if parent.file_name() != Some(OsStr::new("runtime")) {
-        return Err("运行时目录结构无效".to_string());
     }
     Ok(())
 }
@@ -139,18 +146,11 @@ fn required_files(provider: ManagedRuntimeProvider, runtime: &Path) -> Vec<PathB
                 .join("bin")
                 .join(if cfg!(windows) { "codex.exe" } else { "codex" })]
         }
-        ManagedRuntimeProvider::Opencode => vec![{
-            let bin_dir = runtime.join("bin");
-            if cfg!(windows) {
-                if bin_dir.join("opencode.exe").exists() {
-                    bin_dir.join("opencode.exe")
-                } else {
-                    bin_dir.join("opencode")
-                }
-            } else {
-                bin_dir.join("opencode")
-            }
-        }],
+        ManagedRuntimeProvider::Opencode => vec![runtime.join("bin").join(if cfg!(windows) {
+            "opencode.exe"
+        } else {
+            "opencode"
+        })],
         ManagedRuntimeProvider::PiWeb => vec![
             runtime.join(if cfg!(windows) { "node.exe" } else { "node" }),
             runtime.join("bin").join("pi-web.js"),
@@ -163,18 +163,15 @@ fn required_files(provider: ManagedRuntimeProvider, runtime: &Path) -> Vec<PathB
 }
 
 fn ensure_required_files(provider: ManagedRuntimeProvider, runtime: &Path) -> Result<(), String> {
+    // 用 fs::metadata 跟随符号链接/junction：codex 官方安装脚本在 Unix 上
+    // 会把 bin/codex 装成指向 CODEX_HOME 的符号链接，Windows 上则把整个
+    // bin 目录变成 junction，二者都是合法产物；悬空链接会因 metadata 报错
+    // 而被判定为缺失。
     if let Some(missing) = required_files(provider, runtime)
         .into_iter()
-        .find(|path| {
-            fs::symlink_metadata(path)
-                .map(|metadata| !metadata.file_type().is_file())
-                .unwrap_or(true)
-        })
+        .find(|path| fs::metadata(path).map(|m| !m.is_file()).unwrap_or(true))
     {
-        return Err(format!(
-            "运行时安装不完整，缺少 {}",
-            missing.display()
-        ));
+        return Err(format!("运行时安装不完整，缺少 {}", missing.display()));
     }
     if provider == ManagedRuntimeProvider::Codex || provider == ManagedRuntimeProvider::Opencode {
         for executable in required_files(provider, runtime) {
@@ -209,8 +206,7 @@ fn set_executable(path: &Path) -> Result<(), String> {
         .map_err(|error| format!("读取文件权限失败：{error}"))?
         .permissions();
     permissions.set_mode(permissions.mode() | 0o755);
-    fs::set_permissions(path, permissions)
-        .map_err(|error| format!("设置可执行权限失败：{error}"))
+    fs::set_permissions(path, permissions).map_err(|error| format!("设置可执行权限失败：{error}"))
 }
 
 #[cfg(not(unix))]
@@ -231,6 +227,73 @@ fn copy_file(src: &Path, dst: &Path) -> Result<(), String> {
         )
     })?;
     Ok(())
+}
+
+fn copy_dir(src: &Path, dst: &Path) -> Result<(), String> {
+    fs::create_dir_all(dst).map_err(|error| format!("创建目录失败 {}：{error}", dst.display()))?;
+    for entry in
+        fs::read_dir(src).map_err(|error| format!("读取目录失败 {}：{error}", src.display()))?
+    {
+        let entry =
+            entry.map_err(|error| format!("读取目录条目失败 {}：{error}", src.display()))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("读取文件类型失败 {}：{error}", entry.path().display()))?;
+        let target = dst.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_dir(&entry.path(), &target)?;
+        } else if file_type.is_symlink() {
+            return Err(format!(
+                "npm 包内含符号链接，暂不支持部署：{}",
+                entry.path().display()
+            ));
+        } else {
+            copy_file(&entry.path(), &target)?;
+        }
+    }
+    Ok(())
+}
+
+/// 把 npm 包的内容（不含 node_modules）部署到 runtime 根目录。
+///
+/// 入口脚本（dsh 的 lib/bin.js、pi-web 的 bin/pi-web.js）都按自身位置解析
+/// 相对路径：dsh 动态 import 同目录的 chunk 并读取 ../package.json，
+/// pi-web 通过 __dirname/.. 定位 .next 与依赖。因此必须保持包内相对布局
+/// 整体落地，而不能只复制入口单文件；包的运行时依赖已由 npm 提升到
+/// runtime/node_modules，向上查找即可命中。
+fn deploy_npm_package(package_dir: &Path, runtime_dir: &Path) -> Result<(), String> {
+    if !package_dir.is_dir() {
+        return Err(format!("npm 安装后未找到包目录：{}", package_dir.display()));
+    }
+    for entry in fs::read_dir(package_dir)
+        .map_err(|error| format!("读取包目录失败 {}：{error}", package_dir.display()))?
+    {
+        let entry = entry
+            .map_err(|error| format!("读取包目录条目失败 {}：{error}", package_dir.display()))?;
+        if entry.file_name() == OsStr::new("node_modules") {
+            continue;
+        }
+        let target = runtime_dir.join(entry.file_name());
+        if entry
+            .file_type()
+            .map_err(|error| format!("读取文件类型失败 {}：{error}", entry.path().display()))?
+            .is_dir()
+        {
+            copy_dir(&entry.path(), &target)?;
+        } else {
+            copy_file(&entry.path(), &target)?;
+        }
+    }
+    Ok(())
+}
+
+/// npm 包安装后在 --prefix 目录中的落点（支持 @scope/name 形式）。
+fn npm_package_dir(runtime_dir: &Path, package: &str) -> PathBuf {
+    let mut dir = runtime_dir.join("node_modules");
+    for part in package.split('/') {
+        dir = dir.join(part);
+    }
+    dir
 }
 
 fn user_home_dir() -> Result<PathBuf, String> {
@@ -254,10 +317,22 @@ async fn run_command(
     if let Some(dir) = current_dir {
         command.current_dir(dir);
     }
-    let output = command
-        .output()
+    // 超时后 future 被 drop，kill_on_drop 确保子进程随之终止，不会留下
+    // 悬挂的安装脚本占住 provider 的并发锁。
+    command.kill_on_drop(true);
+    let output = tokio::time::timeout(INSTALL_COMMAND_TIMEOUT, command.output())
         .await
-        .map_err(|error| format!("运行安装命令失败（{program}）：{error}"))?;
+        .map_err(|_| {
+            format!(
+                "安装命令超时（{program}，超过 {} 分钟）",
+                INSTALL_COMMAND_TIMEOUT.as_secs() / 60
+            )
+        })?
+        .map_err(|error| {
+            format!(
+                "运行安装命令失败（{program}）：{error}\n请确认已安装 {program} 且在 PATH 中可用"
+            )
+        })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -267,6 +342,64 @@ async fn run_command(
         ));
     }
     Ok(())
+}
+
+async fn probe_program(program: &str, args: &[&str]) -> bool {
+    Command::new(program)
+        .args(args)
+        .output()
+        .await
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+/// 解析可用的 npm。桌面 GUI 进程不继承登录 shell 的 PATH，直接 spawn
+/// 失败时回退到登录 shell 中查找（与 pi_web_process 的本机发现策略一致）。
+async fn resolve_npm() -> Result<String, String> {
+    const HINT: &str =
+        "未找到 npm：托管运行时安装需要 npm，请先安装 Node.js（https://nodejs.org）后重试";
+    if cfg!(windows) {
+        if probe_program("cmd.exe", &["/c", "npm", "--version"]).await {
+            return Ok("npm".to_string());
+        }
+        return Err(HINT.to_string());
+    }
+    if probe_program("npm", &["--version"]).await {
+        return Ok("npm".to_string());
+    }
+    #[cfg(unix)]
+    {
+        if let Some(path) = login_shell_lookup("npm") {
+            if probe_program(&path, &["--version"]).await {
+                return Ok(path);
+            }
+        }
+    }
+    Err(HINT.to_string())
+}
+
+#[cfg(unix)]
+fn login_shell_lookup(program: &str) -> Option<String> {
+    let shell = if Path::new("/bin/zsh").is_file() {
+        "/bin/zsh"
+    } else {
+        "/bin/bash"
+    };
+    let output = std::process::Command::new(shell)
+        .args(["-lic", &format!("command -v {program}")])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    // 登录 shell 可能输出 MOTD 等杂音，取最后一行非空输出。
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .last()
+        .filter(|line| Path::new(line).is_file())
 }
 
 fn http_client() -> Result<reqwest::Client, String> {
@@ -281,9 +414,7 @@ async fn download_node(runtime_dir: &Path, version: &str) -> Result<(), String> 
     let client = http_client()?;
 
     if cfg!(windows) {
-        let url = format!(
-            "https://nodejs.org/dist/v{version}/node-v{version}-{platform}.zip"
-        );
+        let url = format!("https://nodejs.org/dist/v{version}/node-v{version}-{platform}.zip");
         let bytes = client
             .get(&url)
             .send()
@@ -296,9 +427,7 @@ async fn download_node(runtime_dir: &Path, version: &str) -> Result<(), String> 
             .map_err(|error| format!("读取 Node 响应失败：{error}"))?;
         extract_node_from_zip(&bytes, runtime_dir)?;
     } else if platform.starts_with("darwin") {
-        let url = format!(
-            "https://nodejs.org/dist/v{version}/node-v{version}-{platform}.tar.gz"
-        );
+        let url = format!("https://nodejs.org/dist/v{version}/node-v{version}-{platform}.tar.gz");
         let bytes = client
             .get(&url)
             .send()
@@ -311,9 +440,7 @@ async fn download_node(runtime_dir: &Path, version: &str) -> Result<(), String> 
             .map_err(|error| format!("读取 Node 响应失败：{error}"))?;
         extract_node_from_tar_gz(&bytes, runtime_dir)?;
     } else {
-        let url = format!(
-            "https://nodejs.org/dist/v{version}/node-v{version}-{platform}.tar.xz"
-        );
+        let url = format!("https://nodejs.org/dist/v{version}/node-v{version}-{platform}.tar.xz");
         let bytes = client
             .get(&url)
             .send()
@@ -334,9 +461,14 @@ fn extract_node_from_tar<R: Read>(
     runtime_dir: &Path,
 ) -> Result<(), String> {
     let node_name = OsStr::new(if cfg!(windows) { "node.exe" } else { "node" });
-    for entry in archive.entries().map_err(|error| format!("读取 tar 归档失败：{error}"))? {
+    for entry in archive
+        .entries()
+        .map_err(|error| format!("读取 tar 归档失败：{error}"))?
+    {
         let mut entry = entry.map_err(|error| format!("读取 tar 条目失败：{error}"))?;
-        let path = entry.path().map_err(|error| format!("读取 tar 路径失败：{error}"))?;
+        let path = entry
+            .path()
+            .map_err(|error| format!("读取 tar 路径失败：{error}"))?;
         let components: Vec<_> = path.components().collect();
         if components.len() == 3
             && matches!(components[1], Component::Normal(os_str) if os_str == OsStr::new("bin"))
@@ -367,8 +499,8 @@ fn extract_node_from_tar_xz(bytes: &[u8], runtime_dir: &Path) -> Result<(), Stri
 
 fn extract_node_from_zip(bytes: &[u8], runtime_dir: &Path) -> Result<(), String> {
     let reader = Cursor::new(bytes);
-    let mut archive = zip::ZipArchive::new(reader)
-        .map_err(|error| format!("打开 Node zip 归档失败：{error}"))?;
+    let mut archive =
+        zip::ZipArchive::new(reader).map_err(|error| format!("打开 Node zip 归档失败：{error}"))?;
     for i in 0..archive.len() {
         let mut file = archive
             .by_index(i)
@@ -387,7 +519,12 @@ fn extract_node_from_zip(bytes: &[u8], runtime_dir: &Path) -> Result<(), String>
     Err("Node zip 归档中未找到 node.exe".to_string())
 }
 
-async fn run_npm_install(runtime_dir: &Path, package: &str, version: &str) -> Result<(), String> {
+async fn run_npm_install(
+    npm: &str,
+    runtime_dir: &Path,
+    package: &str,
+    version: &str,
+) -> Result<(), String> {
     let spec = format!("{package}@{version}");
     let prefix = runtime_dir.display().to_string();
     if cfg!(windows) {
@@ -395,136 +532,204 @@ async fn run_npm_install(runtime_dir: &Path, package: &str, version: &str) -> Re
         // extension is resolved reliably and quoted args are handled.
         run_command(
             "cmd.exe",
-            &["/c", "npm", "install", "--prefix", &prefix, &spec],
+            &["/c", npm, "install", "--prefix", &prefix, &spec],
             &[],
             None,
         )
         .await
     } else {
-        run_command("npm", &["install", "--prefix", &prefix, &spec], &[], None).await
+        run_command(npm, &["install", "--prefix", &prefix, &spec], &[], None).await
     }
 }
 
 async fn install_codex(runtime_dir: &Path, manifest: &ProviderManifest) -> Result<(), String> {
     let version = strip_rust_prefix(&manifest.version);
+    #[cfg(windows)]
+    {
+        install_codex_windows(runtime_dir, version).await
+    }
+    #[cfg(not(windows))]
+    {
+        install_codex_unix(runtime_dir, version).await
+    }
+}
+
+/// Windows 走官方 npm 平台包而非 install.ps1：ps1 会无条件把私有 bin 目录
+/// 写入注册表 User PATH（读取的是注册表而非进程环境，无法通过环境变量规避），
+/// 与"不修改用户 PATH"的承诺冲突。npm 平台包（@openai/codex@<version>-win32-x64）
+/// 内含与 standalone 发布完全相同的 vendor 布局，部署后等价。
+#[cfg(windows)]
+async fn install_codex_windows(runtime_dir: &Path, version: &str) -> Result<(), String> {
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "x64",
+        "aarch64" => "arm64",
+        other => return Err(format!("当前架构暂不支持托管 Codex：{other}")),
+    };
+    if !is_safe_version_token(version) {
+        return Err(format!("Codex 清单版本号无效：{version}"));
+    }
+    let npm = resolve_npm().await?;
+    run_npm_install(
+        &npm,
+        runtime_dir,
+        "@openai/codex",
+        &format!("{version}-win32-{arch}"),
+    )
+    .await?;
+
+    // vendor/<target>/ 下是 standalone 布局（bin/codex.exe、codex-path/rg.exe、
+    // codex-resources/…），整体部署到 runtime 根目录。
+    let vendor_dir = runtime_dir
+        .join("node_modules")
+        .join("@openai/codex")
+        .join("vendor");
+    let target_dir = single_child_dir(&vendor_dir)
+        .ok_or_else(|| format!("Codex npm 包 vendor 目录结构异常：{}", vendor_dir.display()))?;
+    deploy_npm_package(&target_dir, runtime_dir)
+}
+
+/// 返回目录中唯一的子目录（vendor 下应只有一个 target 三元组目录）。
+#[cfg(windows)]
+fn single_child_dir(dir: &Path) -> Option<PathBuf> {
+    let mut dirs = fs::read_dir(dir)
+        .ok()?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().map(|t| t.is_dir()).unwrap_or(false));
+    let first = dirs.next()?;
+    if dirs.next().is_some() {
+        return None;
+    }
+    Some(first.path())
+}
+
+#[cfg(not(windows))]
+async fn install_codex_unix(runtime_dir: &Path, version: &str) -> Result<(), String> {
     let bin_dir = runtime_dir.join("bin");
-    fs::create_dir_all(&bin_dir)
-        .map_err(|error| format!("创建 Codex bin 目录失败：{error}"))?;
+    // CODEX_HOME 指向 provider 根目录（runtime 的上一级）：
+    // - 官方脚本把实际二进制下载到 $CODEX_HOME/packages/standalone，再把
+    //   bin/codex 装成指向那里的符号链接；
+    // - 该目录在 runtime 轮换（重装/回滚）之外持久存在，链接不会悬空，
+    //   重装时还能复用已下载的 release 缓存。
+    // bin 目录交给官方脚本创建。
     let managed_dir = runtime_dir
         .parent()
         .ok_or_else(|| "运行时目录结构无效".to_string())?;
+
+    // 官方脚本的 add_to_path 在 PATH 已包含 BIN_DIR 时跳过写入 shell
+    // profile；把私有 bin 前置到子进程 PATH 来兑现"不修改用户 PATH"的承诺。
+    // 注意这只是绕过钩子，子进程里 codex 的调用方不依赖 PATH。
+    let child_path = {
+        let mut paths = vec![bin_dir.clone()];
+        if let Some(existing) = std::env::var_os("PATH") {
+            paths.extend(std::env::split_paths(&existing));
+        }
+        std::env::join_paths(paths)
+            .map_err(|error| format!("构造子进程 PATH 失败：{error}"))?
+            .to_string_lossy()
+            .into_owned()
+    };
 
     let envs = [
         ("CODEX_INSTALL_DIR", bin_dir.display().to_string()),
         ("CODEX_HOME", managed_dir.display().to_string()),
         ("CODEX_RELEASE", version.to_string()),
+        // 官方脚本在检测到冲突安装（如 npm 全局装过 codex）时会交互式询问，
+        // GUI 管道 stdio 下会一直挂到超时；显式声明非交互，冲突时仅告警。
+        ("CODEX_NON_INTERACTIVE", "1".to_string()),
+        ("PATH", child_path),
     ];
 
-    if cfg!(windows) {
-        run_command(
-            "cmd.exe",
-            &[
-                "/c",
-                r#"powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex""#,
-            ],
-            &envs,
-            None,
-        )
-        .await
+    run_command(
+        "sh",
+        &["-c", "curl -fsSL https://chatgpt.com/codex/install.sh | sh"],
+        &envs,
+        None,
+    )
+    .await
+}
+
+/// OpenCode 官方 npm 包通过 optionalDependencies 分发平台二进制
+/// （opencode-windows-x64 等），bin/opencode 只是需要 node 的转发脚本。
+/// 直接部署原生二进制，避免运行时依赖系统 node。
+fn opencode_platform_package() -> Result<String, String> {
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "x64",
+        "aarch64" => "arm64",
+        other => return Err(format!("当前架构暂不支持托管 OpenCode：{other}")),
+    };
+    let platform = match std::env::consts::OS {
+        "windows" => "windows",
+        "macos" => "darwin",
+        "linux" => "linux",
+        other => return Err(format!("当前平台暂不支持托管 OpenCode：{other}")),
+    };
+    Ok(format!("opencode-{platform}-{arch}"))
+}
+
+fn copy_opencode_native_binary(runtime_dir: &Path) -> Result<(), String> {
+    let package_name = opencode_platform_package()?;
+    let binary_name = if cfg!(windows) {
+        "opencode.exe"
     } else {
-        run_command(
-            "sh",
-            &[
-                "-c",
-                "curl -fsSL https://chatgpt.com/codex/install.sh | sh",
-            ],
-            &envs,
-            None,
-        )
-        .await
+        "opencode"
+    };
+    let source = runtime_dir
+        .join("node_modules")
+        .join(&package_name)
+        .join("bin")
+        .join(binary_name);
+    if !source.is_file() {
+        return Err(format!(
+            "npm 安装后未找到 OpenCode 原生二进制（可选依赖 {package_name} 未安装）：{}",
+            source.display()
+        ));
     }
+    let destination = runtime_dir.join("bin").join(binary_name);
+    copy_file(&source, &destination)?;
+    set_executable(&destination)?;
+    Ok(())
 }
 
 async fn install_opencode(runtime_dir: &Path, manifest: &ProviderManifest) -> Result<(), String> {
-    let bin_dir = runtime_dir.join("bin");
-    fs::create_dir_all(&bin_dir)
-        .map_err(|error| format!("创建 OpenCode bin 目录失败：{error}"))?;
-
     if cfg!(windows) {
-        let package = manifest
-            .install
-            .package
-            .as_deref()
-            .unwrap_or("opencode-ai");
-        run_npm_install(runtime_dir, package, &manifest.version).await?;
-        copy_opencode_from_npm(runtime_dir, &bin_dir)?;
+        let npm = resolve_npm().await?;
+        let package = manifest.install.package.as_deref().unwrap_or("opencode-ai");
+        run_npm_install(&npm, runtime_dir, package, &manifest.version).await?;
+        copy_opencode_native_binary(runtime_dir)?;
     } else {
-        run_command(
-            "bash",
-            &[
-                "-c",
-                "curl -fsSL https://opencode.ai/install | bash -s -- --no-modify-path",
-            ],
-            &[],
-            None,
-        )
-        .await?;
+        // 通过 --version 固定到清单版本；官方脚本默认装 latest，会导致
+        // 实际版本与 manifest.version 漂移。
+        let version = &manifest.version;
+        if !is_safe_version_token(version) {
+            return Err(format!("OpenCode 清单版本号无效：{version}"));
+        }
+        let script = format!(
+            "curl -fsSL https://opencode.ai/install | bash -s -- --no-modify-path --version {version}"
+        );
+        run_command("bash", &["-c", &script], &[], None).await?;
         let source = user_home_dir()?
             .join(".opencode")
             .join("bin")
             .join("opencode");
         if !source.is_file() {
             return Err(format!(
-                "OpenCode 安装脚本未在预期位置生成可执行文件：{}",
+                "OpenCode 安装脚本未在预期位置生成可执行文件：{}\n若 PATH 中已存在相同版本的 opencode，官方脚本会跳过安装，请先移除或重命名后重试",
                 source.display()
             ));
         }
-        copy_file(&source, &bin_dir.join("opencode"))?;
-        set_executable(&bin_dir.join("opencode"))?;
+        let destination = runtime_dir.join("bin").join("opencode");
+        copy_file(&source, &destination)?;
+        set_executable(&destination)?;
     }
     Ok(())
 }
 
-fn copy_opencode_from_npm(runtime_dir: &Path, bin_dir: &Path) -> Result<(), String> {
-    // Prefer the actual native binary shipped inside the package, falling back
-    // to the npm `.bin` shims if the postinstall script did not download it.
-    let package_bin = runtime_dir
-        .join("node_modules")
-        .join("opencode-ai")
-        .join("bin")
-        .join("opencode.exe");
-    if package_bin.is_file() && package_bin.metadata().map(|m| m.len() > 1024).unwrap_or(false) {
-        copy_file(&package_bin, &bin_dir.join("opencode.exe"))?;
-        return Ok(());
-    }
-
-    let npm_bin = runtime_dir.join("node_modules").join(".bin");
-    let candidates: Vec<PathBuf> = ["opencode.exe", "opencode", "opencode.cmd"]
-        .iter()
-        .map(|name| npm_bin.join(name))
-        .filter(|path| path.is_file())
-        .collect();
-
-    if candidates.is_empty() {
-        return Err(format!(
-            "npm 安装后未在 {} 找到 OpenCode 可执行文件",
-            npm_bin.display()
-        ));
-    }
-
-    for source in &candidates {
-        let name = source.file_name().unwrap_or_else(|| OsStr::new("opencode"));
-        copy_file(source, &bin_dir.join(name))?;
-    }
-
-    let primary = bin_dir.join("opencode.exe");
-    if !primary.is_file() {
-        let fallback = bin_dir.join("opencode");
-        if fallback.is_file() {
-            set_executable(&fallback)?;
-        }
-    }
-    Ok(())
+/// 版本号只允许出现在 shell 命令与 npm spec 中安全的字符。
+fn is_safe_version_token(version: &str) -> bool {
+    !version.is_empty()
+        && version
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+'))
 }
 
 async fn install_pi_web(runtime_dir: &Path, manifest: &ProviderManifest) -> Result<(), String> {
@@ -535,27 +740,22 @@ async fn install_pi_web(runtime_dir: &Path, manifest: &ProviderManifest) -> Resu
         .unwrap_or(NODE_VERSION);
     download_node(runtime_dir, node_version).await?;
 
+    let npm = resolve_npm().await?;
     let package = manifest
         .install
         .package
         .as_deref()
         .unwrap_or("@agegr/pi-web");
-    run_npm_install(runtime_dir, package, &manifest.version).await?;
+    run_npm_install(&npm, runtime_dir, package, &manifest.version).await?;
 
-    let source = runtime_dir
-        .join("node_modules")
-        .join("@agegr")
-        .join("pi-web")
-        .join("bin")
-        .join("pi-web.js");
-    if !source.is_file() {
+    let package_dir = npm_package_dir(runtime_dir, package);
+    if !package_dir.join("bin").join("pi-web.js").is_file() {
         return Err(format!(
             "Pi Web 安装后未找到入口文件：{}",
-            source.display()
+            package_dir.join("bin").join("pi-web.js").display()
         ));
     }
-    copy_file(&source, &runtime_dir.join("bin").join("pi-web.js"))?;
-    Ok(())
+    deploy_npm_package(&package_dir, runtime_dir)
 }
 
 async fn install_dsh(runtime_dir: &Path, manifest: &ProviderManifest) -> Result<(), String> {
@@ -566,52 +766,22 @@ async fn install_dsh(runtime_dir: &Path, manifest: &ProviderManifest) -> Result<
         .unwrap_or(NODE_VERSION);
     download_node(runtime_dir, node_version).await?;
 
+    let npm = resolve_npm().await?;
     let package = manifest
         .install
         .package
         .as_deref()
         .unwrap_or("@deepseek-ai/dsh");
-    run_npm_install(runtime_dir, package, &manifest.version).await?;
+    run_npm_install(&npm, runtime_dir, package, &manifest.version).await?;
 
-    let entry = resolve_dsh_entry(runtime_dir)?;
-    if !entry.is_file() {
+    let package_dir = npm_package_dir(runtime_dir, package);
+    if !package_dir.join("lib").join("bin.js").is_file() {
         return Err(format!(
             "DSH 安装后未找到入口文件：{}",
-            entry.display()
+            package_dir.join("lib").join("bin.js").display()
         ));
     }
-    copy_file(&entry, &runtime_dir.join("lib").join("bin.js"))?;
-    Ok(())
-}
-
-fn resolve_dsh_entry(runtime_dir: &Path) -> Result<PathBuf, String> {
-    let package_json = runtime_dir
-        .join("node_modules")
-        .join("@deepseek-ai")
-        .join("dsh")
-        .join("package.json");
-    let content = fs::read_to_string(&package_json)
-        .map_err(|error| format!("读取 DSH package.json 失败：{error}"))?;
-    let package: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|error| format!("解析 DSH package.json 失败：{error}"))?;
-    let bin = package
-        .get("bin")
-        .ok_or_else(|| "DSH package.json 缺少 bin 字段".to_string())?;
-    let entry = match bin {
-        serde_json::Value::String(value) => value.clone(),
-        serde_json::Value::Object(map) => map
-            .get("dsh")
-            .and_then(|value| value.as_str())
-            .or_else(|| map.values().next().and_then(|value| value.as_str()))
-            .ok_or_else(|| "DSH package.json bin 字段为空".to_string())?
-            .to_string(),
-        _ => return Err("DSH package.json bin 字段格式无效".to_string()),
-    };
-    Ok(runtime_dir
-        .join("node_modules")
-        .join("@deepseek-ai")
-        .join("dsh")
-        .join(entry))
+    deploy_npm_package(&package_dir, runtime_dir)
 }
 
 fn strip_rust_prefix(version: &str) -> &str {
@@ -625,11 +795,9 @@ fn prepare_runtime_dir(runtime_dir: &Path) -> Result<PathBuf, String> {
     let backup = parent.join(".previous-runtime");
     let _ = fs::remove_dir_all(&backup);
     if runtime_dir.exists() {
-        fs::rename(runtime_dir, &backup)
-            .map_err(|error| format!("备份现有运行时失败：{error}"))?;
+        fs::rename(runtime_dir, &backup).map_err(|error| format!("备份现有运行时失败：{error}"))?;
     }
-    fs::create_dir_all(runtime_dir)
-        .map_err(|error| format!("创建运行时目录失败：{error}"))?;
+    fs::create_dir_all(runtime_dir).map_err(|error| format!("创建运行时目录失败：{error}"))?;
     Ok(backup)
 }
 
@@ -671,8 +839,17 @@ async fn install_runtime(
     };
 
     let combined = install_result.and(verify_result);
-    finish_runtime_dir(&runtime_dir, &backup, combined.is_ok())?;
-    combined?;
+    // 恢复备份失败时不能吞掉原始安装错误，两者都要报告给用户。
+    let final_result = match finish_runtime_dir(&runtime_dir, &backup, combined.is_ok()) {
+        Ok(()) => combined,
+        Err(restore_error) => match combined {
+            Ok(()) => Err(restore_error),
+            Err(install_error) => Err(format!(
+                "{install_error}\n（恢复原运行时也失败：{restore_error}）"
+            )),
+        },
+    };
+    final_result?;
 
     Ok(ManagedRuntimeInstall {
         provider: provider.key(),
@@ -700,6 +877,14 @@ pub async fn runtime_download_managed(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use flate2::{write::GzEncoder, Compression};
+
+    fn test_directory() -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("xiaoyan-runtime-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).expect("create test directory");
+        dir
+    }
 
     #[test]
     fn managed_paths_are_outside_packaged_resources() {
@@ -708,6 +893,187 @@ mod tests {
             managed_runtime_dir(root, ManagedRuntimeProvider::PiWeb),
             root.join("managed-runtimes/pi-web/runtime")
         );
+    }
+
+    #[test]
+    fn validate_managed_dir_accepts_provider_runtime_layout() {
+        let root = test_directory();
+        let runtime_dir = root.join("managed-runtimes").join("codex").join("runtime");
+        fs::create_dir_all(&runtime_dir).expect("create runtime dir");
+        assert!(validate_managed_dir(&runtime_dir, &root).is_ok());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn validate_managed_dir_rejects_unexpected_layout() {
+        let root = test_directory();
+        // 末段不是 runtime
+        let wrong_tail = root.join("managed-runtimes").join("codex").join("dist");
+        fs::create_dir_all(&wrong_tail).expect("create dir");
+        assert!(validate_managed_dir(&wrong_tail, &root).is_err());
+        // 不在应用数据目录下
+        let outside = root.join("other").join("runtime");
+        fs::create_dir_all(&outside).expect("create dir");
+        assert!(validate_managed_dir(&outside, &root).is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn validate_managed_dir_accepts_not_yet_created_runtime() {
+        // 安装前 runtime 目录可能尚不存在，此时用未规范化路径比较。
+        let root = test_directory();
+        let runtime_dir = root.join("managed-runtimes").join("dsh").join("runtime");
+        assert!(validate_managed_dir(&runtime_dir, &root).is_ok());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn deploy_npm_package_preserves_relative_layout() {
+        let root = test_directory();
+        let package_dir = root.join("pkg");
+        let runtime_dir = root.join("runtime");
+        for path in [
+            "bin/pi-web.js",
+            "bin/pi-web-options.js",
+            ".next/server.js",
+            "package.json",
+        ] {
+            let file = package_dir.join(path);
+            fs::create_dir_all(file.parent().expect("parent")).expect("create parent");
+            fs::write(&file, path).expect("write file");
+        }
+        fs::create_dir_all(package_dir.join("node_modules/next")).expect("create node_modules");
+        fs::write(package_dir.join("node_modules/next/index.js"), "").expect("write dep");
+
+        deploy_npm_package(&package_dir, &runtime_dir).expect("deploy package");
+
+        assert!(runtime_dir.join("bin/pi-web.js").is_file());
+        assert!(runtime_dir.join("bin/pi-web-options.js").is_file());
+        assert!(runtime_dir.join(".next/server.js").is_file());
+        assert!(runtime_dir.join("package.json").is_file());
+        // 包内 node_modules 不复制：运行时依赖已由 npm 提升到 runtime/node_modules。
+        assert!(!runtime_dir.join("node_modules/next").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn deploy_npm_package_errors_when_package_missing() {
+        let root = test_directory();
+        let result = deploy_npm_package(&root.join("absent"), &root.join("runtime"));
+        assert!(result.is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn npm_package_dir_handles_scoped_names() {
+        let runtime = Path::new("/tmp/runtime");
+        assert_eq!(
+            npm_package_dir(runtime, "@deepseek-ai/dsh"),
+            runtime.join("node_modules/@deepseek-ai/dsh")
+        );
+        assert_eq!(
+            npm_package_dir(runtime, "opencode-ai"),
+            runtime.join("node_modules/opencode-ai")
+        );
+    }
+
+    #[test]
+    fn extract_node_from_tar_gz_pulls_the_node_binary() {
+        let root = test_directory();
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+        {
+            let mut archive = tar::Builder::new(&mut encoder);
+            let content = b"node-binary";
+            let mut header = tar::Header::new_gnu();
+            header.set_size(content.len() as u64);
+            header.set_mode(0o755);
+            header.set_cksum();
+            archive
+                .append_data(
+                    &mut header,
+                    "node-v22.19.0-darwin-arm64/bin/node",
+                    &content[..],
+                )
+                .expect("append node entry");
+            let mut filler = tar::Header::new_gnu();
+            filler.set_size(0);
+            filler.set_mode(0o644);
+            filler.set_cksum();
+            archive
+                .append_data(&mut filler, "node-v22.19.0-darwin-arm64/README.md", &[][..])
+                .expect("append filler entry");
+            archive.into_inner().expect("finish tar");
+        }
+        let bytes = encoder.finish().expect("finish gzip");
+        let runtime_dir = root.join("runtime");
+        fs::create_dir_all(&runtime_dir).expect("create runtime");
+
+        extract_node_from_tar_gz(&bytes, &runtime_dir).expect("extract node");
+
+        assert_eq!(
+            fs::read(runtime_dir.join("node")).expect("read node"),
+            b"node-binary"
+        );
+        assert!(!runtime_dir.join("README.md").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ensure_required_files_follows_official_installer_symlinks() {
+        let root = test_directory();
+        let runtime_dir = root.join("runtime");
+        let target = root.join("packages/standalone/codex");
+        fs::create_dir_all(target.parent().expect("target parent")).expect("create target dir");
+        fs::write(&target, "codex-binary").expect("write binary");
+        set_executable(&target).expect("make binary executable");
+        fs::create_dir_all(runtime_dir.join("bin")).expect("create bin dir");
+        std::os::unix::fs::symlink(&target, runtime_dir.join("bin/codex")).expect("create symlink");
+
+        assert!(ensure_required_files(ManagedRuntimeProvider::Codex, &runtime_dir).is_ok());
+
+        // 悬空链接必须被判定为缺失。
+        fs::remove_file(&target).expect("remove target");
+        assert!(ensure_required_files(ManagedRuntimeProvider::Codex, &runtime_dir).is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn ensure_required_files_reports_missing_entries() {
+        let root = test_directory();
+        let runtime_dir = root.join("runtime");
+        fs::create_dir_all(&runtime_dir).expect("create runtime");
+        let result = ensure_required_files(ManagedRuntimeProvider::PiWeb, &runtime_dir);
+        assert!(result.is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn is_safe_version_token_rejects_shell_metacharacters() {
+        assert!(is_safe_version_token("1.18.23"));
+        assert!(is_safe_version_token("0.1.1-rc.2"));
+        assert!(!is_safe_version_token(""));
+        assert!(!is_safe_version_token("1.0; rm -rf /"));
+        assert!(!is_safe_version_token("$(id)"));
+    }
+
+    #[test]
+    fn opencode_platform_package_matches_current_platform() {
+        let package = opencode_platform_package().expect("resolve platform package");
+        let (platform, arch) = (std::env::consts::OS, std::env::consts::ARCH);
+        assert!(package.starts_with("opencode-"));
+        if platform == "macos" {
+            assert!(package.starts_with("opencode-darwin-"));
+        } else if platform == "windows" {
+            assert!(package.starts_with("opencode-windows-"));
+        } else if platform == "linux" {
+            assert!(package.starts_with("opencode-linux-"));
+        }
+        assert!(package.ends_with(
+            arch.replace("x86_64", "x64")
+                .replace("aarch64", "arm64")
+                .as_str()
+        ));
     }
 
     #[test]
@@ -732,17 +1098,19 @@ mod tests {
 
     #[test]
     fn codex_manifest_parses() {
-        let manifest = ManagedRuntimeProvider::Codex.manifest().expect("parse codex manifest");
+        let manifest = ManagedRuntimeProvider::Codex
+            .manifest()
+            .expect("parse codex manifest");
         assert_eq!(manifest.install._method, InstallMethod::Shell);
-        assert_eq!(strip_rust_prefix(&manifest.version), manifest.version.trim_start_matches("rust-"));
+        assert_eq!(
+            strip_rust_prefix(&manifest.version),
+            manifest.version.trim_start_matches("rust-")
+        );
     }
 
     #[test]
     fn npm_provider_manifests_include_node_version() {
-        for provider in [
-            ManagedRuntimeProvider::Dsh,
-            ManagedRuntimeProvider::PiWeb,
-        ] {
+        for provider in [ManagedRuntimeProvider::Dsh, ManagedRuntimeProvider::PiWeb] {
             let manifest = provider.manifest().expect("parse manifest");
             assert!(
                 matches!(manifest.install._method, InstallMethod::Npm),
@@ -767,7 +1135,9 @@ mod tests {
         let root = Path::new("/tmp/xiaoyan-runtime");
         assert_eq!(
             required_files(ManagedRuntimeProvider::Codex, root),
-            vec![root.join("bin").join(if cfg!(windows) { "codex.exe" } else { "codex" })]
+            vec![root
+                .join("bin")
+                .join(if cfg!(windows) { "codex.exe" } else { "codex" })]
         );
         assert_eq!(
             required_files(ManagedRuntimeProvider::PiWeb, root),
