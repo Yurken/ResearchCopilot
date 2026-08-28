@@ -16,6 +16,6 @@ opencode web --hostname 127.0.0.1 --port <random-port>
 
 - 固定使用 loopback，不启用 `0.0.0.0` 或 mDNS。
 - 小妍不读取或复制 OpenCode provider 凭据；连接模型继续使用 OpenCode 官方页面。
-- 桌面安装包不包含 OpenCode；一键安装的固定版本由独立运行时流水线发布并校验，且不修改系统 PATH。
+- 桌面安装包不包含 OpenCode；一键安装使用官网安装命令，将其安装到小妍私有目录并校验，且不修改系统 PATH。
 - 小妍拒绝启动低于 `1.1.10` 的 OpenCode Web；这些版本处于官方已公开本地代码执行漏洞的影响范围。
 - 升级后至少验证 `opencode --version`、`opencode web --help`、随机端口启动、iframe 加载、停止和重启。

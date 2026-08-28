@@ -9,9 +9,9 @@ interface ManagedRuntimeInstall {
   installedPath: string;
 }
 
-function formatDownloadError(error: unknown) {
+function formatInstallError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error ?? "");
-  return message.trim() || "运行时下载失败，请稍后重试。";
+  return message.trim() || "运行时安装失败，请稍后重试。";
 }
 
 export function useManagedRuntimeDownload(
@@ -31,7 +31,7 @@ export function useManagedRuntimeDownload(
       await onInstalled();
       return result;
     } catch (cause) {
-      setError(formatDownloadError(cause));
+      setError(formatInstallError(cause));
       return null;
     } finally {
       setDownloading(false);

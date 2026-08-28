@@ -1,4 +1,7 @@
 {
   "version": "1.18.23",
-  "commit": "5f5ea53afb2630227ead917f1a0ddf784c33150c"
+  "commit": "5f5ea53afb2630227ead917f1a0ddf784c33150c",
+  "install": {
+    "method": "shell"
+  }
 }

@@ -1,18 +1,19 @@
-use flate2::read::GzDecoder;
-use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
+    ffi::OsStr,
     fs,
-    path::{Path, PathBuf},
+    io::{Cursor, Read},
+    path::{Component, Path, PathBuf},
     sync::Arc,
+    time::Duration,
 };
 use tauri::State;
-use tokio::{io::AsyncWriteExt, sync::Mutex};
+use tokio::{process::Command, sync::Mutex};
 
-const DEFAULT_MANIFEST_URL: &str =
-    "https://pub-9c3110eb71b241e5a88d8aa3388af9a2.r2.dev/runtimes/latest.json";
+const NODE_VERSION: &str = "22.19.0";
+const NODE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const INSTALL_COMMAND_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 #[derive(Debug, Clone, Copy, Deserialize, Eq, Hash, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -32,27 +33,46 @@ impl ManagedRuntimeProvider {
             Self::PiWeb => "pi-web",
         }
     }
+
+    fn manifest_json(self) -> &'static str {
+        match self {
+            Self::Codex => include_str!("../resources/codex/manifest.json"),
+            Self::Dsh => include_str!("../resources/dsh/manifest.json"),
+            Self::Opencode => include_str!("../resources/opencode/manifest.json"),
+            Self::PiWeb => include_str!("../resources/pi-web/manifest.json"),
+        }
+    }
+
+    fn manifest(self) -> Result<ProviderManifest, String> {
+        serde_json::from_str(self.manifest_json())
+            .map_err(|error| format!("解析 {} 托管运行时清单失败：{error}", self.key()))
+    }
 }
 
 #[derive(Debug, Deserialize)]
-struct RuntimeManifest {
-    #[serde(rename = "schemaVersion")]
-    schema_version: u32,
-    targets: HashMap<String, RuntimeTarget>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RuntimeTarget {
-    providers: HashMap<String, RuntimeArtifact>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RuntimeArtifact {
+struct ProviderManifest {
     version: String,
-    url: String,
-    sha256: String,
-    size: u64,
+    #[allow(dead_code)]
+    #[serde(default)]
+    commit: String,
+    install: InstallConfig,
+}
+
+#[derive(Debug, Deserialize)]
+struct InstallConfig {
+    #[serde(rename = "method")]
+    _method: InstallMethod,
+    #[serde(default)]
+    package: Option<String>,
+    #[serde(default, rename = "nodeVersion")]
+    node_version: Option<String>,
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+enum InstallMethod {
+    Shell,
+    Npm,
 }
 
 #[derive(Debug, Serialize)]
@@ -85,29 +105,36 @@ pub fn managed_runtime_dir(app_data_dir: &Path, provider: ManagedRuntimeProvider
         .join("runtime")
 }
 
-fn runtime_target() -> Result<&'static str, String> {
+fn node_platform_name() -> Result<&'static str, String> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("macos", "aarch64") => Ok("darwin-aarch64"),
-        ("windows", "x86_64") => Ok("windows-x86_64"),
-        ("linux", "x86_64") => Ok("linux-x86_64"),
+        ("macos", "aarch64") => Ok("darwin-arm64"),
+        ("macos", "x86_64") => Ok("darwin-x64"),
+        ("windows", "x86_64") => Ok("win-x64"),
+        ("linux", "x86_64") => Ok("linux-x64"),
         (os, arch) => Err(format!("当前平台暂不支持托管运行时：{os}/{arch}")),
     }
 }
 
-fn manifest_url() -> String {
-    std::env::var("XIAOYAN_RUNTIME_MANIFEST_URL")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| DEFAULT_MANIFEST_URL.to_string())
-}
-
-fn validate_download_url(url: &str) -> Result<(), String> {
-    let parsed =
-        reqwest::Url::parse(url).map_err(|error| format!("运行时下载地址无效：{error}"))?;
-    let secure = parsed.scheme() == "https";
-    let local_test = parsed.scheme() == "http" && parsed.host_str() == Some("127.0.0.1");
-    if !secure && !local_test {
-        return Err("运行时下载地址必须使用 HTTPS".to_string());
+fn validate_managed_dir(runtime_dir: &Path, app_data_dir: &Path) -> Result<(), String> {
+    if runtime_dir.file_name() != Some(OsStr::new("runtime")) {
+        return Err("运行时目录结构无效".to_string());
+    }
+    let provider_dir = runtime_dir
+        .parent()
+        .ok_or_else(|| "运行时目录无效".to_string())?;
+    // canonicalize 只对已存在的目录生效；两侧要么都规范化、要么都不规范
+    // 化，避免 /var 与 /private/var 这类前缀不一致导致的误判。
+    let canonical_provider = provider_dir.canonicalize().ok();
+    let expected = match &canonical_provider {
+        Some(_) => app_data_dir
+            .canonicalize()
+            .unwrap_or_else(|_| app_data_dir.to_path_buf())
+            .join("managed-runtimes"),
+        None => app_data_dir.to_path_buf().join("managed-runtimes"),
+    };
+    let actual = canonical_provider.unwrap_or_else(|| provider_dir.to_path_buf());
+    if !actual.starts_with(&expected) {
+        return Err("运行时目录不在应用数据目录下".to_string());
     }
     Ok(())
 }
@@ -135,32 +162,20 @@ fn required_files(provider: ManagedRuntimeProvider, runtime: &Path) -> Vec<PathB
     }
 }
 
-fn executable_files(provider: ManagedRuntimeProvider, runtime: &Path) -> Vec<PathBuf> {
-    match provider {
-        ManagedRuntimeProvider::Codex => required_files(provider, runtime),
-        ManagedRuntimeProvider::Opencode => required_files(provider, runtime),
-        ManagedRuntimeProvider::PiWeb | ManagedRuntimeProvider::Dsh => {
-            vec![runtime.join(if cfg!(windows) { "node.exe" } else { "node" })]
-        }
-    }
-}
-
-fn reject_symbolic_links(root: &Path) -> Result<(), String> {
-    for entry in fs::read_dir(root).map_err(|error| format!("检查运行时目录失败：{error}"))?
+fn ensure_required_files(provider: ManagedRuntimeProvider, runtime: &Path) -> Result<(), String> {
+    // 用 fs::metadata 跟随符号链接/junction：codex 官方安装脚本在 Unix 上
+    // 会把 bin/codex 装成指向 CODEX_HOME 的符号链接，Windows 上则把整个
+    // bin 目录变成 junction，二者都是合法产物；悬空链接会因 metadata 报错
+    // 而被判定为缺失。
+    if let Some(missing) = required_files(provider, runtime)
+        .into_iter()
+        .find(|path| fs::metadata(path).map(|m| !m.is_file()).unwrap_or(true))
     {
-        let entry = entry.map_err(|error| format!("检查运行时文件失败：{error}"))?;
-        let path = entry.path();
-        let file_type = entry
-            .file_type()
-            .map_err(|error| format!("检查运行时文件类型失败：{error}"))?;
-        if file_type.is_symlink() {
-            return Err(format!(
-                "运行时压缩包包含不允许的符号链接：{}",
-                path.display()
-            ));
-        }
-        if file_type.is_dir() {
-            reject_symbolic_links(&path)?;
+        return Err(format!("运行时安装不完整，缺少 {}", missing.display()));
+    }
+    if provider == ManagedRuntimeProvider::Codex || provider == ManagedRuntimeProvider::Opencode {
+        for executable in required_files(provider, runtime) {
+            ensure_executable(&executable)?;
         }
     }
     Ok(())
@@ -184,178 +199,662 @@ fn ensure_executable(_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn install_archive(
-    archive_path: &Path,
-    provider_root: &Path,
-    provider: ManagedRuntimeProvider,
-) -> Result<PathBuf, String> {
-    let staging = provider_root.join(".installing");
-    let backup = provider_root.join(".previous");
-    let destination = provider_root.join("runtime");
-    let _ = fs::remove_dir_all(&staging);
-    let _ = fs::remove_dir_all(&backup);
-    fs::create_dir_all(&staging).map_err(|error| format!("创建运行时安装目录失败：{error}"))?;
-
-    let archive =
-        fs::File::open(archive_path).map_err(|error| format!("读取运行时压缩包失败：{error}"))?;
-    let mut archive = tar::Archive::new(GzDecoder::new(archive));
-    archive
-        .unpack(&staging)
-        .map_err(|error| format!("解压运行时失败：{error}"))?;
-    let staged_runtime = staging.join("runtime");
-    reject_symbolic_links(&staged_runtime)?;
-    if let Some(missing) = required_files(provider, &staged_runtime)
-        .into_iter()
-        .find(|path| {
-            fs::symlink_metadata(path)
-                .map(|metadata| !metadata.file_type().is_file())
-                .unwrap_or(true)
-        })
-    {
-        return Err(format!("运行时压缩包不完整，缺少 {}", missing.display()));
-    }
-    for executable in executable_files(provider, &staged_runtime) {
-        ensure_executable(&executable)?;
-    }
-
-    if destination.exists() {
-        fs::rename(&destination, &backup)
-            .map_err(|error| format!("备份现有运行时失败：{error}"))?;
-    }
-    if let Err(error) = fs::rename(&staged_runtime, &destination) {
-        if backup.exists() {
-            let _ = fs::rename(&backup, &destination);
-        }
-        return Err(format!("安装运行时失败：{error}"));
-    }
-    let _ = fs::remove_dir_all(&backup);
-    let _ = fs::remove_dir_all(&staging);
-    Ok(destination)
+#[cfg(unix)]
+fn set_executable(path: &Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut permissions = fs::metadata(path)
+        .map_err(|error| format!("读取文件权限失败：{error}"))?
+        .permissions();
+    permissions.set_mode(permissions.mode() | 0o755);
+    fs::set_permissions(path, permissions).map_err(|error| format!("设置可执行权限失败：{error}"))
 }
 
-async fn download_runtime(
+#[cfg(not(unix))]
+fn set_executable(_path: &Path) -> Result<(), String> {
+    Ok(())
+}
+
+fn copy_file(src: &Path, dst: &Path) -> Result<(), String> {
+    if let Some(parent) = dst.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("创建目录失败 {}：{error}", parent.display()))?;
+    }
+    fs::copy(src, dst).map_err(|error| {
+        format!(
+            "复制文件 {} -> {} 失败：{error}",
+            src.display(),
+            dst.display()
+        )
+    })?;
+    Ok(())
+}
+
+fn copy_dir(src: &Path, dst: &Path) -> Result<(), String> {
+    fs::create_dir_all(dst).map_err(|error| format!("创建目录失败 {}：{error}", dst.display()))?;
+    for entry in
+        fs::read_dir(src).map_err(|error| format!("读取目录失败 {}：{error}", src.display()))?
+    {
+        let entry =
+            entry.map_err(|error| format!("读取目录条目失败 {}：{error}", src.display()))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("读取文件类型失败 {}：{error}", entry.path().display()))?;
+        let target = dst.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_dir(&entry.path(), &target)?;
+        } else if file_type.is_symlink() {
+            return Err(format!(
+                "npm 包内含符号链接，暂不支持部署：{}",
+                entry.path().display()
+            ));
+        } else {
+            copy_file(&entry.path(), &target)?;
+        }
+    }
+    Ok(())
+}
+
+/// 把 npm 包的内容（不含 node_modules）部署到 runtime 根目录。
+///
+/// 入口脚本（dsh 的 lib/bin.js、pi-web 的 bin/pi-web.js）都按自身位置解析
+/// 相对路径：dsh 动态 import 同目录的 chunk 并读取 ../package.json，
+/// pi-web 通过 __dirname/.. 定位 .next 与依赖。因此必须保持包内相对布局
+/// 整体落地，而不能只复制入口单文件；包的运行时依赖已由 npm 提升到
+/// runtime/node_modules，向上查找即可命中。
+fn deploy_npm_package(package_dir: &Path, runtime_dir: &Path) -> Result<(), String> {
+    if !package_dir.is_dir() {
+        return Err(format!("npm 安装后未找到包目录：{}", package_dir.display()));
+    }
+    for entry in fs::read_dir(package_dir)
+        .map_err(|error| format!("读取包目录失败 {}：{error}", package_dir.display()))?
+    {
+        let entry = entry
+            .map_err(|error| format!("读取包目录条目失败 {}：{error}", package_dir.display()))?;
+        if entry.file_name() == OsStr::new("node_modules") {
+            continue;
+        }
+        let target = runtime_dir.join(entry.file_name());
+        if entry
+            .file_type()
+            .map_err(|error| format!("读取文件类型失败 {}：{error}", entry.path().display()))?
+            .is_dir()
+        {
+            copy_dir(&entry.path(), &target)?;
+        } else {
+            copy_file(&entry.path(), &target)?;
+        }
+    }
+    Ok(())
+}
+
+/// npm 包安装后在 --prefix 目录中的落点（支持 @scope/name 形式）。
+fn npm_package_dir(runtime_dir: &Path, package: &str) -> PathBuf {
+    let mut dir = runtime_dir.join("node_modules");
+    for part in package.split('/') {
+        dir = dir.join(part);
+    }
+    dir
+}
+
+fn user_home_dir() -> Result<PathBuf, String> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .ok_or_else(|| "无法确定用户主目录".to_string())
+}
+
+async fn run_command(
+    program: &str,
+    args: &[&str],
+    envs: &[(&str, String)],
+    current_dir: Option<&Path>,
+) -> Result<(), String> {
+    let mut command = Command::new(program);
+    command.args(args);
+    for (key, value) in envs {
+        command.env(key, value);
+    }
+    if let Some(dir) = current_dir {
+        command.current_dir(dir);
+    }
+    // 超时后 future 被 drop，kill_on_drop 确保子进程随之终止，不会留下
+    // 悬挂的安装脚本占住 provider 的并发锁。
+    command.kill_on_drop(true);
+    let output = tokio::time::timeout(INSTALL_COMMAND_TIMEOUT, command.output())
+        .await
+        .map_err(|_| {
+            format!(
+                "安装命令超时（{program}，超过 {} 分钟）",
+                INSTALL_COMMAND_TIMEOUT.as_secs() / 60
+            )
+        })?
+        .map_err(|error| {
+            format!(
+                "运行安装命令失败（{program}）：{error}\n请确认已安装 {program} 且在 PATH 中可用"
+            )
+        })?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        return Err(format!(
+            "安装命令退出失败（{}）：{}\nstdout：{}",
+            output.status, stderr, stdout
+        ));
+    }
+    Ok(())
+}
+
+async fn probe_program(program: &str, args: &[&str]) -> bool {
+    Command::new(program)
+        .args(args)
+        .output()
+        .await
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+/// 解析可用的 npm。桌面 GUI 进程不继承登录 shell 的 PATH，直接 spawn
+/// 失败时回退到登录 shell 中查找（与 pi_web_process 的本机发现策略一致）。
+async fn resolve_npm() -> Result<String, String> {
+    const HINT: &str =
+        "未找到 npm：托管运行时安装需要 npm，请先安装 Node.js（https://nodejs.org）后重试";
+    if cfg!(windows) {
+        if probe_program("cmd.exe", &["/c", "npm", "--version"]).await {
+            return Ok("npm".to_string());
+        }
+        return Err(HINT.to_string());
+    }
+    if probe_program("npm", &["--version"]).await {
+        return Ok("npm".to_string());
+    }
+    #[cfg(unix)]
+    {
+        if let Some(path) = login_shell_lookup("npm") {
+            if probe_program(&path, &["--version"]).await {
+                return Ok(path);
+            }
+        }
+    }
+    Err(HINT.to_string())
+}
+
+#[cfg(unix)]
+fn login_shell_lookup(program: &str) -> Option<String> {
+    let shell = if Path::new("/bin/zsh").is_file() {
+        "/bin/zsh"
+    } else {
+        "/bin/bash"
+    };
+    let output = std::process::Command::new(shell)
+        .args(["-lic", &format!("command -v {program}")])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    // 登录 shell 可能输出 MOTD 等杂音，取最后一行非空输出。
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .last()
+        .filter(|line| Path::new(line).is_file())
+}
+
+fn http_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .timeout(NODE_DOWNLOAD_TIMEOUT)
+        .build()
+        .map_err(|error| format!("创建 HTTP 客户端失败：{error}"))
+}
+
+async fn download_node(runtime_dir: &Path, version: &str) -> Result<(), String> {
+    let platform = node_platform_name()?;
+    let client = http_client()?;
+
+    if cfg!(windows) {
+        let url = format!("https://nodejs.org/dist/v{version}/node-v{version}-{platform}.zip");
+        let bytes = client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|error| format!("下载 Node 失败：{error}"))?
+            .error_for_status()
+            .map_err(|error| format!("下载 Node 失败：{error}"))?
+            .bytes()
+            .await
+            .map_err(|error| format!("读取 Node 响应失败：{error}"))?;
+        extract_node_from_zip(&bytes, runtime_dir)?;
+    } else if platform.starts_with("darwin") {
+        let url = format!("https://nodejs.org/dist/v{version}/node-v{version}-{platform}.tar.gz");
+        let bytes = client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|error| format!("下载 Node 失败：{error}"))?
+            .error_for_status()
+            .map_err(|error| format!("下载 Node 失败：{error}"))?
+            .bytes()
+            .await
+            .map_err(|error| format!("读取 Node 响应失败：{error}"))?;
+        extract_node_from_tar_gz(&bytes, runtime_dir)?;
+    } else {
+        let url = format!("https://nodejs.org/dist/v{version}/node-v{version}-{platform}.tar.xz");
+        let bytes = client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|error| format!("下载 Node 失败：{error}"))?
+            .error_for_status()
+            .map_err(|error| format!("下载 Node 失败：{error}"))?
+            .bytes()
+            .await
+            .map_err(|error| format!("读取 Node 响应失败：{error}"))?;
+        extract_node_from_tar_xz(&bytes, runtime_dir)?;
+    }
+    Ok(())
+}
+
+fn extract_node_from_tar<R: Read>(
+    archive: &mut tar::Archive<R>,
+    runtime_dir: &Path,
+) -> Result<(), String> {
+    let node_name = OsStr::new(if cfg!(windows) { "node.exe" } else { "node" });
+    for entry in archive
+        .entries()
+        .map_err(|error| format!("读取 tar 归档失败：{error}"))?
+    {
+        let mut entry = entry.map_err(|error| format!("读取 tar 条目失败：{error}"))?;
+        let path = entry
+            .path()
+            .map_err(|error| format!("读取 tar 路径失败：{error}"))?;
+        let components: Vec<_> = path.components().collect();
+        if components.len() == 3
+            && matches!(components[1], Component::Normal(os_str) if os_str == OsStr::new("bin"))
+            && path.file_name() == Some(node_name)
+        {
+            let dest = runtime_dir.join(node_name);
+            entry.unpack(&dest).map_err(|error| {
+                format!("解压 Node 二进制文件到 {} 失败：{error}", dest.display())
+            })?;
+            set_executable(&dest)?;
+            return Ok(());
+        }
+    }
+    Err("Node 压缩包中未找到 node 二进制文件".to_string())
+}
+
+fn extract_node_from_tar_gz(bytes: &[u8], runtime_dir: &Path) -> Result<(), String> {
+    let decoder = flate2::read::GzDecoder::new(bytes);
+    let mut archive = tar::Archive::new(decoder);
+    extract_node_from_tar(&mut archive, runtime_dir)
+}
+
+fn extract_node_from_tar_xz(bytes: &[u8], runtime_dir: &Path) -> Result<(), String> {
+    let decoder = xz2::read::XzDecoder::new(bytes);
+    let mut archive = tar::Archive::new(decoder);
+    extract_node_from_tar(&mut archive, runtime_dir)
+}
+
+fn extract_node_from_zip(bytes: &[u8], runtime_dir: &Path) -> Result<(), String> {
+    let reader = Cursor::new(bytes);
+    let mut archive =
+        zip::ZipArchive::new(reader).map_err(|error| format!("打开 Node zip 归档失败：{error}"))?;
+    for i in 0..archive.len() {
+        let mut file = archive
+            .by_index(i)
+            .map_err(|error| format!("读取 zip 条目失败：{error}"))?;
+        let name = file.name().replace('\\', "/");
+        let parts: Vec<_> = name.split('/').collect();
+        if parts.len() == 2 && parts[1] == "node.exe" {
+            let dest = runtime_dir.join("node.exe");
+            let mut out = fs::File::create(&dest)
+                .map_err(|error| format!("创建 Node 可执行文件失败：{error}"))?;
+            std::io::copy(&mut file, &mut out)
+                .map_err(|error| format!("写入 Node 可执行文件失败：{error}"))?;
+            return Ok(());
+        }
+    }
+    Err("Node zip 归档中未找到 node.exe".to_string())
+}
+
+async fn run_npm_install(
+    npm: &str,
+    runtime_dir: &Path,
+    package: &str,
+    version: &str,
+) -> Result<(), String> {
+    let spec = format!("{package}@{version}");
+    let prefix = runtime_dir.display().to_string();
+    if cfg!(windows) {
+        // On Windows npm is a .cmd file; run it through cmd.exe /c so the
+        // extension is resolved reliably and quoted args are handled.
+        run_command(
+            "cmd.exe",
+            &["/c", npm, "install", "--prefix", &prefix, &spec],
+            &[],
+            None,
+        )
+        .await
+    } else {
+        run_command(npm, &["install", "--prefix", &prefix, &spec], &[], None).await
+    }
+}
+
+async fn install_codex(runtime_dir: &Path, manifest: &ProviderManifest) -> Result<(), String> {
+    let version = strip_rust_prefix(&manifest.version);
+    #[cfg(windows)]
+    {
+        install_codex_windows(runtime_dir, version).await
+    }
+    #[cfg(not(windows))]
+    {
+        install_codex_unix(runtime_dir, version).await
+    }
+}
+
+/// Windows 走官方 npm 平台包而非 install.ps1：ps1 会无条件把私有 bin 目录
+/// 写入注册表 User PATH（读取的是注册表而非进程环境，无法通过环境变量规避），
+/// 与"不修改用户 PATH"的承诺冲突。npm 平台包（@openai/codex@<version>-win32-x64）
+/// 内含与 standalone 发布完全相同的 vendor 布局，部署后等价。
+#[cfg(windows)]
+async fn install_codex_windows(runtime_dir: &Path, version: &str) -> Result<(), String> {
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "x64",
+        "aarch64" => "arm64",
+        other => return Err(format!("当前架构暂不支持托管 Codex：{other}")),
+    };
+    if !is_safe_version_token(version) {
+        return Err(format!("Codex 清单版本号无效：{version}"));
+    }
+    let npm = resolve_npm().await?;
+    run_npm_install(
+        &npm,
+        runtime_dir,
+        "@openai/codex",
+        &format!("{version}-win32-{arch}"),
+    )
+    .await?;
+
+    // vendor/<target>/ 下是 standalone 布局（bin/codex.exe、codex-path/rg.exe、
+    // codex-resources/…），整体部署到 runtime 根目录。
+    let vendor_dir = runtime_dir
+        .join("node_modules")
+        .join("@openai/codex")
+        .join("vendor");
+    let target_dir = single_child_dir(&vendor_dir)
+        .ok_or_else(|| format!("Codex npm 包 vendor 目录结构异常：{}", vendor_dir.display()))?;
+    deploy_npm_package(&target_dir, runtime_dir)
+}
+
+/// 返回目录中唯一的子目录（vendor 下应只有一个 target 三元组目录）。
+#[cfg(windows)]
+fn single_child_dir(dir: &Path) -> Option<PathBuf> {
+    let mut dirs = fs::read_dir(dir)
+        .ok()?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().map(|t| t.is_dir()).unwrap_or(false));
+    let first = dirs.next()?;
+    if dirs.next().is_some() {
+        return None;
+    }
+    Some(first.path())
+}
+
+#[cfg(not(windows))]
+async fn install_codex_unix(runtime_dir: &Path, version: &str) -> Result<(), String> {
+    let bin_dir = runtime_dir.join("bin");
+    // CODEX_HOME 指向 provider 根目录（runtime 的上一级）：
+    // - 官方脚本把实际二进制下载到 $CODEX_HOME/packages/standalone，再把
+    //   bin/codex 装成指向那里的符号链接；
+    // - 该目录在 runtime 轮换（重装/回滚）之外持久存在，链接不会悬空，
+    //   重装时还能复用已下载的 release 缓存。
+    // bin 目录交给官方脚本创建。
+    let managed_dir = runtime_dir
+        .parent()
+        .ok_or_else(|| "运行时目录结构无效".to_string())?;
+
+    // 官方脚本的 add_to_path 在 PATH 已包含 BIN_DIR 时跳过写入 shell
+    // profile；把私有 bin 前置到子进程 PATH 来兑现"不修改用户 PATH"的承诺。
+    // 注意这只是绕过钩子，子进程里 codex 的调用方不依赖 PATH。
+    let child_path = {
+        let mut paths = vec![bin_dir.clone()];
+        if let Some(existing) = std::env::var_os("PATH") {
+            paths.extend(std::env::split_paths(&existing));
+        }
+        std::env::join_paths(paths)
+            .map_err(|error| format!("构造子进程 PATH 失败：{error}"))?
+            .to_string_lossy()
+            .into_owned()
+    };
+
+    let envs = [
+        ("CODEX_INSTALL_DIR", bin_dir.display().to_string()),
+        ("CODEX_HOME", managed_dir.display().to_string()),
+        ("CODEX_RELEASE", version.to_string()),
+        // 官方脚本在检测到冲突安装（如 npm 全局装过 codex）时会交互式询问，
+        // GUI 管道 stdio 下会一直挂到超时；显式声明非交互，冲突时仅告警。
+        ("CODEX_NON_INTERACTIVE", "1".to_string()),
+        ("PATH", child_path),
+    ];
+
+    run_command(
+        "sh",
+        &["-c", "curl -fsSL https://chatgpt.com/codex/install.sh | sh"],
+        &envs,
+        None,
+    )
+    .await
+}
+
+/// OpenCode 官方 npm 包通过 optionalDependencies 分发平台二进制
+/// （opencode-windows-x64 等），bin/opencode 只是需要 node 的转发脚本。
+/// 直接部署原生二进制，避免运行时依赖系统 node。
+fn opencode_platform_package() -> Result<String, String> {
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "x64",
+        "aarch64" => "arm64",
+        other => return Err(format!("当前架构暂不支持托管 OpenCode：{other}")),
+    };
+    let platform = match std::env::consts::OS {
+        "windows" => "windows",
+        "macos" => "darwin",
+        "linux" => "linux",
+        other => return Err(format!("当前平台暂不支持托管 OpenCode：{other}")),
+    };
+    Ok(format!("opencode-{platform}-{arch}"))
+}
+
+fn copy_opencode_native_binary(runtime_dir: &Path) -> Result<(), String> {
+    let package_name = opencode_platform_package()?;
+    let binary_name = if cfg!(windows) {
+        "opencode.exe"
+    } else {
+        "opencode"
+    };
+    let source = runtime_dir
+        .join("node_modules")
+        .join(&package_name)
+        .join("bin")
+        .join(binary_name);
+    if !source.is_file() {
+        return Err(format!(
+            "npm 安装后未找到 OpenCode 原生二进制（可选依赖 {package_name} 未安装）：{}",
+            source.display()
+        ));
+    }
+    let destination = runtime_dir.join("bin").join(binary_name);
+    copy_file(&source, &destination)?;
+    set_executable(&destination)?;
+    Ok(())
+}
+
+async fn install_opencode(runtime_dir: &Path, manifest: &ProviderManifest) -> Result<(), String> {
+    if cfg!(windows) {
+        let npm = resolve_npm().await?;
+        let package = manifest.install.package.as_deref().unwrap_or("opencode-ai");
+        run_npm_install(&npm, runtime_dir, package, &manifest.version).await?;
+        copy_opencode_native_binary(runtime_dir)?;
+    } else {
+        // 通过 --version 固定到清单版本；官方脚本默认装 latest，会导致
+        // 实际版本与 manifest.version 漂移。
+        let version = &manifest.version;
+        if !is_safe_version_token(version) {
+            return Err(format!("OpenCode 清单版本号无效：{version}"));
+        }
+        let script = format!(
+            "curl -fsSL https://opencode.ai/install | bash -s -- --no-modify-path --version {version}"
+        );
+        run_command("bash", &["-c", &script], &[], None).await?;
+        let source = user_home_dir()?
+            .join(".opencode")
+            .join("bin")
+            .join("opencode");
+        if !source.is_file() {
+            return Err(format!(
+                "OpenCode 安装脚本未在预期位置生成可执行文件：{}\n若 PATH 中已存在相同版本的 opencode，官方脚本会跳过安装，请先移除或重命名后重试",
+                source.display()
+            ));
+        }
+        let destination = runtime_dir.join("bin").join("opencode");
+        copy_file(&source, &destination)?;
+        set_executable(&destination)?;
+    }
+    Ok(())
+}
+
+/// 版本号只允许出现在 shell 命令与 npm spec 中安全的字符。
+fn is_safe_version_token(version: &str) -> bool {
+    !version.is_empty()
+        && version
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+'))
+}
+
+async fn install_pi_web(runtime_dir: &Path, manifest: &ProviderManifest) -> Result<(), String> {
+    let node_version = manifest
+        .install
+        .node_version
+        .as_deref()
+        .unwrap_or(NODE_VERSION);
+    download_node(runtime_dir, node_version).await?;
+
+    let npm = resolve_npm().await?;
+    let package = manifest
+        .install
+        .package
+        .as_deref()
+        .unwrap_or("@agegr/pi-web");
+    run_npm_install(&npm, runtime_dir, package, &manifest.version).await?;
+
+    let package_dir = npm_package_dir(runtime_dir, package);
+    if !package_dir.join("bin").join("pi-web.js").is_file() {
+        return Err(format!(
+            "Pi Web 安装后未找到入口文件：{}",
+            package_dir.join("bin").join("pi-web.js").display()
+        ));
+    }
+    deploy_npm_package(&package_dir, runtime_dir)
+}
+
+async fn install_dsh(runtime_dir: &Path, manifest: &ProviderManifest) -> Result<(), String> {
+    let node_version = manifest
+        .install
+        .node_version
+        .as_deref()
+        .unwrap_or(NODE_VERSION);
+    download_node(runtime_dir, node_version).await?;
+
+    let npm = resolve_npm().await?;
+    let package = manifest
+        .install
+        .package
+        .as_deref()
+        .unwrap_or("@deepseek-ai/dsh");
+    run_npm_install(&npm, runtime_dir, package, &manifest.version).await?;
+
+    let package_dir = npm_package_dir(runtime_dir, package);
+    if !package_dir.join("lib").join("bin.js").is_file() {
+        return Err(format!(
+            "DSH 安装后未找到入口文件：{}",
+            package_dir.join("lib").join("bin.js").display()
+        ));
+    }
+    deploy_npm_package(&package_dir, runtime_dir)
+}
+
+fn strip_rust_prefix(version: &str) -> &str {
+    version.strip_prefix("rust-").unwrap_or(version)
+}
+
+fn prepare_runtime_dir(runtime_dir: &Path) -> Result<PathBuf, String> {
+    let parent = runtime_dir
+        .parent()
+        .ok_or_else(|| "运行时目录结构无效".to_string())?;
+    let backup = parent.join(".previous-runtime");
+    let _ = fs::remove_dir_all(&backup);
+    if runtime_dir.exists() {
+        fs::rename(runtime_dir, &backup).map_err(|error| format!("备份现有运行时失败：{error}"))?;
+    }
+    fs::create_dir_all(runtime_dir).map_err(|error| format!("创建运行时目录失败：{error}"))?;
+    Ok(backup)
+}
+
+fn finish_runtime_dir(runtime_dir: &Path, backup: &Path, success: bool) -> Result<(), String> {
+    if success {
+        let _ = fs::remove_dir_all(backup);
+        Ok(())
+    } else {
+        let _ = fs::remove_dir_all(runtime_dir);
+        if backup.exists() {
+            fs::rename(backup, runtime_dir)
+                .map_err(|error| format!("恢复运行时备份失败：{error}"))?;
+        }
+        Ok(())
+    }
+}
+
+async fn install_runtime(
     state: &RuntimeInstallerState,
     provider: ManagedRuntimeProvider,
 ) -> Result<ManagedRuntimeInstall, String> {
-    let manifest_url = manifest_url();
-    validate_download_url(&manifest_url)?;
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30 * 60))
-        .build()
-        .map_err(|error| format!("创建运行时下载客户端失败：{error}"))?;
-    let manifest = client
-        .get(&manifest_url)
-        .send()
-        .await
-        .map_err(|error| format!("获取运行时清单失败：{error}"))?
-        .error_for_status()
-        .map_err(|error| format!("获取运行时清单失败：{error}"))?
-        .json::<RuntimeManifest>()
-        .await
-        .map_err(|error| format!("解析运行时清单失败：{error}"))?;
-    if manifest.schema_version != 1 {
-        return Err(format!(
-            "不支持的运行时清单版本：{}",
-            manifest.schema_version
-        ));
-    }
-    let target = runtime_target()?;
-    let artifact = manifest
-        .targets
-        .get(target)
-        .and_then(|entry| entry.providers.get(provider.key()))
-        .ok_or_else(|| format!("运行时清单没有提供 {target} / {}", provider.key()))?;
-    validate_download_url(&artifact.url)?;
-    if artifact.sha256.len() != 64
-        || !artifact
-            .sha256
-            .chars()
-            .all(|value| value.is_ascii_hexdigit())
-    {
-        return Err("运行时清单中的 SHA-256 无效".to_string());
-    }
+    let manifest = provider.manifest()?;
+    let runtime_dir = managed_runtime_dir(&state.app_data_dir, provider);
+    validate_managed_dir(&runtime_dir, &state.app_data_dir)?;
 
-    let provider_root = state
-        .app_data_dir
-        .join("managed-runtimes")
-        .join(provider.key());
-    fs::create_dir_all(&provider_root).map_err(|error| format!("创建运行时目录失败：{error}"))?;
-    let partial = provider_root.join("runtime.download");
-    let _ = fs::remove_file(&partial);
-    let response = client
-        .get(&artifact.url)
-        .send()
-        .await
-        .map_err(|error| format!("下载运行时失败：{error}"))?
-        .error_for_status()
-        .map_err(|error| format!("下载运行时失败：{error}"))?;
-    if let Some(content_length) = response.content_length() {
-        if content_length != artifact.size {
-            return Err(format!(
-                "运行时下载大小不匹配：预期 {}，服务器返回 {content_length}",
-                artifact.size
-            ));
-        }
-    }
-    let mut file = tokio::fs::File::create(&partial)
-        .await
-        .map_err(|error| format!("创建运行时下载文件失败：{error}"))?;
-    let mut hasher = Sha256::new();
-    let mut downloaded = 0u64;
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = match chunk {
-            Ok(chunk) => chunk,
-            Err(error) => {
-                drop(file);
-                let _ = tokio::fs::remove_file(&partial).await;
-                return Err(format!("下载运行时失败：{error}"));
-            }
-        };
-        downloaded += chunk.len() as u64;
-        if downloaded > artifact.size {
-            drop(file);
-            let _ = tokio::fs::remove_file(&partial).await;
-            return Err("运行时下载内容超过清单声明的大小".to_string());
-        }
-        hasher.update(&chunk);
-        if let Err(error) = file.write_all(&chunk).await {
-            drop(file);
-            let _ = tokio::fs::remove_file(&partial).await;
-            return Err(format!("写入运行时下载文件失败：{error}"));
-        }
-    }
-    if let Err(error) = file.flush().await {
-        drop(file);
-        let _ = tokio::fs::remove_file(&partial).await;
-        return Err(format!("保存运行时下载文件失败：{error}"));
-    }
-    drop(file);
-    if downloaded != artifact.size {
-        let _ = fs::remove_file(&partial);
-        return Err(format!(
-            "运行时下载大小不匹配：预期 {}，实际 {downloaded}",
-            artifact.size
-        ));
-    }
-    let actual_sha256 = format!("{:x}", hasher.finalize());
-    if !actual_sha256.eq_ignore_ascii_case(&artifact.sha256) {
-        let _ = fs::remove_file(&partial);
-        return Err("运行时下载校验失败，请重试".to_string());
-    }
+    let backup = prepare_runtime_dir(&runtime_dir)?;
+    let install_result = match provider {
+        ManagedRuntimeProvider::Codex => install_codex(&runtime_dir, &manifest).await,
+        ManagedRuntimeProvider::Opencode => install_opencode(&runtime_dir, &manifest).await,
+        ManagedRuntimeProvider::PiWeb => install_pi_web(&runtime_dir, &manifest).await,
+        ManagedRuntimeProvider::Dsh => install_dsh(&runtime_dir, &manifest).await,
+    };
 
-    let archive = partial.clone();
-    let install_root = provider_root.clone();
-    let install_result =
-        tokio::task::spawn_blocking(move || install_archive(&archive, &install_root, provider))
-            .await
-            .map_err(|error| format!("运行时安装任务失败：{error}"));
-    let _ = fs::remove_file(&partial);
-    let installed = install_result??;
+    let success = install_result.is_ok();
+    let verify_result = if success {
+        ensure_required_files(provider, &runtime_dir)
+    } else {
+        Ok(())
+    };
+
+    let combined = install_result.and(verify_result);
+    // 恢复备份失败时不能吞掉原始安装错误，两者都要报告给用户。
+    let final_result = match finish_runtime_dir(&runtime_dir, &backup, combined.is_ok()) {
+        Ok(()) => combined,
+        Err(restore_error) => match combined {
+            Ok(()) => Err(restore_error),
+            Err(install_error) => Err(format!(
+                "{install_error}\n（恢复原运行时也失败：{restore_error}）"
+            )),
+        },
+    };
+    final_result?;
+
     Ok(ManagedRuntimeInstall {
         provider: provider.key(),
-        version: artifact.version.clone(),
-        installed_path: installed.display().to_string(),
+        version: manifest.version,
+        installed_path: runtime_dir.display().to_string(),
     })
 }
 
@@ -367,100 +866,14 @@ pub async fn runtime_download_managed(
     {
         let mut active = state.active.lock().await;
         if !active.insert(provider) {
-            return Err("该运行时正在下载，请稍候".to_string());
+            return Err("该运行时正在安装，请稍候".to_string());
         }
     }
-    let result = download_runtime(state.inner(), provider).await;
+    let result = install_runtime(state.inner(), provider).await;
     state.active.lock().await.remove(&provider);
     result
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use flate2::{write::GzEncoder, Compression};
-
-    fn test_directory() -> PathBuf {
-        std::env::temp_dir().join(format!("xiaoyan-runtime-test-{}", uuid::Uuid::new_v4()))
-    }
-
-    fn write_archive(path: &Path, entries: &[(&str, &[u8])]) {
-        let file = fs::File::create(path).expect("create archive");
-        let encoder = GzEncoder::new(file, Compression::fast());
-        let mut archive = tar::Builder::new(encoder);
-        for (entry, content) in entries {
-            let mut header = tar::Header::new_gnu();
-            header.set_size(content.len() as u64);
-            header.set_mode(0o755);
-            header.set_cksum();
-            archive
-                .append_data(&mut header, entry, *content)
-                .expect("append archive entry");
-        }
-        archive
-            .into_inner()
-            .expect("finish tar")
-            .finish()
-            .expect("finish gzip");
-    }
-
-    #[test]
-    fn managed_paths_are_outside_packaged_resources() {
-        let root = Path::new("/tmp/xiaoyan-data");
-        assert_eq!(
-            managed_runtime_dir(root, ManagedRuntimeProvider::PiWeb),
-            root.join("managed-runtimes/pi-web/runtime")
-        );
-    }
-
-    #[test]
-    fn rejects_insecure_runtime_urls() {
-        assert!(validate_download_url("http://example.com/runtime.tar.gz").is_err());
-        assert!(validate_download_url("https://example.com/runtime.tar.gz").is_ok());
-        assert!(validate_download_url("http://127.0.0.1:8000/runtime.tar.gz").is_ok());
-        assert!(validate_download_url("ftp://127.0.0.1/runtime.tar.gz").is_err());
-    }
-
-    #[test]
-    fn installs_a_valid_archive_into_the_provider_directory() {
-        let root = test_directory();
-        fs::create_dir_all(&root).expect("create test root");
-        let archive = root.join("codex.tar.gz");
-        let executable = if cfg!(windows) {
-            "runtime/bin/codex.exe"
-        } else {
-            "runtime/bin/codex"
-        };
-        write_archive(&archive, &[(executable, b"codex")]);
-
-        let installed = install_archive(&archive, &root, ManagedRuntimeProvider::Codex)
-            .expect("install runtime");
-
-        assert_eq!(installed, root.join("runtime"));
-        assert_eq!(
-            fs::read(root.join(executable)).expect("read installed file"),
-            b"codex"
-        );
-        assert!(!root.join(".installing").exists());
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn rejects_an_incomplete_archive_without_replacing_the_current_runtime() {
-        let root = test_directory();
-        let current = root.join("runtime/keep.txt");
-        fs::create_dir_all(current.parent().expect("runtime parent")).expect("create runtime");
-        fs::write(&current, "current").expect("write current runtime");
-        let archive = root.join("incomplete.tar.gz");
-        write_archive(&archive, &[("runtime/README.txt", b"missing executable")]);
-
-        let result = install_archive(&archive, &root, ManagedRuntimeProvider::Codex);
-
-        assert!(result.is_err());
-        assert_eq!(
-            fs::read_to_string(&current).expect("current runtime preserved"),
-            "current"
-        );
-        let _ = fs::remove_dir_all(root);
-    }
-}
+#[path = "runtime_installer_tests.rs"]
+mod tests;
