@@ -37,7 +37,7 @@ export default function RuntimeExecutableSettings({
           </Button>
         ) : null}
       </div>
-      <div className="flex gap-2">
+      <div className="flex flex-nowrap gap-2">
         <Input
           id={id}
           value={value ?? ""}
@@ -45,10 +45,20 @@ export default function RuntimeExecutableSettings({
           placeholder={detectedExecutable ?? `选择 ${label} 可执行文件`}
           className="min-w-0 flex-1"
         />
-        <Button variant="secondary" onClick={onPick} aria-label={`选择 ${label} 可执行文件`}>
+        <Button
+          variant="secondary"
+          className="flex-shrink-0"
+          onClick={onPick}
+          aria-label={`选择 ${label} 可执行文件`}
+        >
           <FolderOpen className="h-4 w-4" />
         </Button>
-        <Button variant="ghost" onClick={onValidate} disabled={!value || busy}>
+        <Button
+          variant="ghost"
+          className="flex-shrink-0 whitespace-nowrap"
+          onClick={onValidate}
+          disabled={!value || busy}
+        >
           检查
         </Button>
       </div>
