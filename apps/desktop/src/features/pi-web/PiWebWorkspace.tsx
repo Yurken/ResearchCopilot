@@ -22,7 +22,7 @@ function RuntimeControls({
   onStop: () => void;
 }) {
   return (
-    <div role={floating ? "toolbar" : undefined} aria-label={floating ? "Pi Web 运行控制" : undefined} className={`flex items-center gap-1.5 ${floating ? "pointer-events-auto rounded-2xl border border-nm-dark/10 p-1.5" : ""}`} style={floating ? { background: "var(--rc-elevated)", boxShadow: "var(--rc-card-shadow)" } : undefined}>
+    <div role={floating ? "toolbar" : undefined} aria-label={floating ? "Pi 运行控制" : undefined} className={`flex items-center gap-1.5 ${floating ? "pointer-events-auto rounded-2xl border border-nm-dark/10 p-1.5" : ""}`} style={floating ? { background: "var(--rc-elevated)", boxShadow: "var(--rc-card-shadow)" } : undefined}>
       <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium" style={{ background: "var(--rc-chip-inset-bg)", color: tone }}>
         <span className={`h-1.5 w-1.5 rounded-full ${phase === "starting" ? "animate-pulse" : ""}`} style={{ background: tone }} />
         {PI_WEB_PHASE_LABELS[phase]}
@@ -48,13 +48,13 @@ export default function PiWebWorkspace() {
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-nm-bg">
       {!isRunning ? (
         <header className="app-header flex flex-shrink-0 items-center justify-between gap-4 border-b border-nm-dark/10 px-6 pb-3">
-          <div className="flex items-center gap-3"><span className="flex h-9 w-9 items-center justify-center rounded-2xl" style={{ background: "var(--rc-chip-bg)", boxShadow: "var(--rc-chip-shadow)" }}><PiWebIcon className="h-4.5 w-4.5" /></span><h1 className="text-[15px] font-semibold text-ink-primary">Pi Web</h1></div>
+          <div className="flex items-center gap-3"><span className="flex h-9 w-9 items-center justify-center rounded-2xl" style={{ background: "var(--rc-chip-bg)", boxShadow: "var(--rc-chip-shadow)" }}><PiWebIcon className="h-4.5 w-4.5" /></span><h1 className="text-[15px] font-semibold text-ink-primary">Pi</h1></div>
           <RuntimeControls phase={phase} tone={tone} busy={runtime.busy} onRestart={() => void runtime.restart()} onStop={() => void runtime.stop()} />
         </header>
       ) : null}
       {isRunning ? (
         <div className="relative min-h-0 flex-1 bg-white">
-          <iframe key={runtime.snapshot?.url} src={runtime.snapshot?.url ?? undefined} title="Pi Web" className="absolute inset-0 h-full w-full border-0" allow="clipboard-read; clipboard-write" sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-modals allow-popups allow-popups-to-escape-sandbox" />
+          <iframe key={runtime.snapshot?.url} src={runtime.snapshot?.url ?? undefined} title="Pi" className="absolute inset-0 h-full w-full border-0" allow="clipboard-read; clipboard-write" sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-modals allow-popups allow-popups-to-escape-sandbox" />
           <div className="pointer-events-none absolute right-3 top-3 z-20"><RuntimeControls floating phase={phase} tone={tone} busy={runtime.busy} onRestart={() => void runtime.restart()} onStop={() => void runtime.stop()} /></div>
         </div>
       ) : <PiWebLaunchPanel runtime={runtime} draft={draft} onDraftChange={updateDraft} />}
