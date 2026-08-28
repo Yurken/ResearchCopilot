@@ -22,4 +22,4 @@ pnpm harness:sources:init
 pnpm harness:sources:update
 ```
 
-更新会让主仓库中的 submodule 指针产生变更。升级 PR 必须检查上游 changelog、许可证和安全公告，再提交这些指针；不要在 submodule 工作区直接堆叠小妍补丁。四套 Harness 的托管运行时都从对应 submodule 的固定提交构建：DSH、Codex、OpenCode 和 Pi Web 各自的 `resources/<name>/manifest.json` 锁定版本与提交，`pnpm <name>:verify-pin` 执行固定版本验证，`pnpm <name>:prepare-runtime` 生成 `resources/<name>/runtime/` 构建产物（已被 gitignore）。这些产物只由独立的 `Managed Runtime Release` 流水线压缩并发布，不再进入桌面安装包。Pi Web 下载包锁定兼容的 Pi 内核依赖（`@earendil-works/pi-*` npm 版本），升级 `vendor/pi-harness` 不会绕过该依赖锁直接替换运行时。
+更新会让主仓库中的 submodule 指针产生变更。升级 PR 必须检查上游 changelog、许可证和安全公告，再提交这些指针；不要在 submodule 工作区直接堆叠小妍补丁。四套 Harness 的托管运行时都从对应 submodule 的固定提交构建：DSH、Codex、OpenCode 和 Pi Web 各自的 `resources/<name>/manifest.json` 锁定版本与提交，`pnpm <name>:verify-pin` 执行固定版本验证，`pnpm <name>:prepare-runtime` 生成 `resources/<name>/runtime/` 构建产物（已被 gitignore）。桌面端安装包不再包含这些运行时；用户首次使用时，后端直接执行各项目官网推荐的安装命令，将其安装到小妍私有目录。Pi Web 下载包锁定兼容的 Pi 内核依赖（`@earendil-works/pi-*` npm 版本），升级 `vendor/pi-harness` 不会绕过该依赖锁直接替换运行时。

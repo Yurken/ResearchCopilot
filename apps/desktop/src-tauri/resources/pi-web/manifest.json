@@ -1,4 +1,9 @@
 {
   "version": "0.8.11",
-  "commit": "28bab3c25f5f6770c9b0b745ebbfec1c27f7b948"
+  "commit": "28bab3c25f5f6770c9b0b745ebbfec1c27f7b948",
+  "install": {
+    "method": "npm",
+    "package": "@agegr/pi-web",
+    "nodeVersion": "22.19.0"
+  }
 }

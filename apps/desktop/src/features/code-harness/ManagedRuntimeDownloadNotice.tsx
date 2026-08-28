@@ -36,7 +36,7 @@ export default function ManagedRuntimeDownloadNotice({
           loading={download.downloading}
           onClick={() => void download.download()}
         >
-          重新下载
+          重新安装
         </Button>
       </div>
     );

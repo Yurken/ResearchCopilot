@@ -6,7 +6,7 @@
 
 - 官方源码通过 `vendor/deepseek-harness` Git submodule 固定到准确 commit。
 - `apps/desktop/src-tauri/resources/dsh/manifest.json` 记录版本、commit 和 Node 要求。
-- 托管运行时独立发布，用户首次使用时下载到应用数据目录，不随小妍发版更新。
+- 托管运行时通过 `npm install --prefix <managed-dir> @deepseek-ai/dsh@<version>` 安装到小妍私有目录，并自带 Node.js 二进制，不随小妍发版更新。
 - profile、插件、凭据和会话位于用户可写的 `DSH_HOME`，不会因应用升级而被覆盖。
 
 运行以下命令检查 submodule 与 manifest 是否一致：
@@ -42,7 +42,7 @@ apps/desktop/src-tauri/resources/dsh/runtime/
 pnpm dsh:prepare-runtime:dev
 ```
 
-该方式只适合开发验证。独立运行时发布流水线使用固定 Node 24，并把 Node.js 许可证一起写入下载包，分别生成 macOS、Windows 和 Linux 运行时。若 Node 二进制旁没有 `LICENSE`，必须通过 `DSH_NODE_LICENSE` 显式指定对应文件。
+该方式只适合开发验证。桌面端实际安装时，后端会下载 Node.js 官方二进制并执行 `npm install --prefix <managed-dir> @deepseek-ai/dsh@<version>`，将其安装到小妍私有目录。
 
 ## 应用运行方式
 
@@ -71,9 +71,7 @@ pnpm dsh:prepare-runtime:dev
 1. 更新 submodule 到待评估的官方 commit。
 2. 同步修改 `resources/dsh/manifest.json` 的版本和 commit。
 3. 运行 `pnpm dsh:verify-pin`。
-4. 通过 `Managed Runtime Release` 为每个目标平台构建并发布托管运行时。
-5. 验证版本输出、Web 页面启动、随机端口、工作目录、模型凭据和至少一轮工具审批。
-6. 运行桌面端 `type-check`、Rust 测试、仓库级 `pnpm type-check` 和 `pnpm lint`。
-7. 在独立运行时发布记录中写明 DSH 上游 commit 和已知兼容性变化。
+4. 验证版本输出、Web 页面启动、随机端口、工作目录、模型凭据和至少一轮工具审批。
+5. 运行桌面端 `type-check`、Rust 测试、仓库级 `pnpm type-check` 和 `pnpm lint`。
 
-如 DSH 升级引入破坏性变化，保留上一份不可变运行时清单并将 `runtimes/latest.json` 回退到已验证版本。
+如 DSH 升级引入破坏性变化，保留上一份可正常工作的本地运行时，待新版本验证通过后再替换。

@@ -1,3 +1,7 @@
 {
-  "commit": "6c59264b14b963d45d1005e7a8b1de87d4b054e2"
+  "version": "0.150.1",
+  "commit": "6c59264b14b963d45d1005e7a8b1de87d4b054e2",
+  "install": {
+    "method": "shell"
+  }
 }

@@ -67,9 +67,6 @@ jobs:
       - name: Verify Harness runtimes are excluded from installers
         run: pnpm runtime:verify-distribution
 
-      - name: Verify managed runtimes are published
-        run: pnpm runtime:verify-published
-
       - name: Type check workspace
         run: pnpm type-check
 

@@ -36,7 +36,6 @@
     "pi-web:prepare-runtime": "node scripts/prepare-pi-web-runtime.mjs",
     "pi-web:prepare-runtime:dev": "node scripts/prepare-pi-web-runtime.mjs --use-current-node",
     "runtime:verify-distribution": "node scripts/verify-runtime-distribution.mjs",
-    "runtime:verify-published": "node scripts/verify-published-runtime-manifest.mjs",
     "harness:sources:init": "git submodule update --init --recursive vendor/deepseek-harness vendor/codex-harness vendor/opencode-harness vendor/pi-harness vendor/pi-web",
     "harness:sources:update": "git submodule update --remote --checkout vendor/deepseek-harness vendor/codex-harness vendor/opencode-harness vendor/pi-harness vendor/pi-web",
     "tauri": "pnpm --dir apps/desktop run tauri",

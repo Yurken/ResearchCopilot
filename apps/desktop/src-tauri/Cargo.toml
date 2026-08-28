@@ -41,6 +41,7 @@ lopdf = "0.42"
 # Zlib decompression for FlateDecode PDF images
 flate2 = "1"
 tar = "0.4"
+xz2 = "0.1"
 # Image encoding (PNG/JPEG)
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 # Base64 for figure data API and settings export
