@@ -10,7 +10,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args: unknown[]) => invokeM
 const stopped: OpenCodeRuntimeSnapshot = {
   phase: "stopped",
   config: { mode: "path", externalExecutable: null, workspaceDir: null },
-  url: null, error: null, logs: [], pathAvailable: true,
+  url: null, error: null, logs: [], pathAvailable: true, bundledAvailable: false, bundledExecutable: null,
   pathExecutable: "/opt/homebrew/bin/opencode", source: "https://github.com/anomalyco/opencode",
 };
 
@@ -20,7 +20,8 @@ describe("OpenCodeWorkspace", () => {
   it("shows the official web runtime launch controls", async () => {
     render(<OpenCodeWorkspace />);
     expect(await screen.findByRole("heading", { name: "启动 OpenCode" })).toBeInTheDocument();
-    expect(screen.getByText(/\/opt\/homebrew\/bin\/opencode/)).toBeInTheDocument();
+    expect(screen.getByText("内置 OpenCode")).toBeInTheDocument();
+    expect(await screen.findByText(/\/opt\/homebrew\/bin\/opencode/)).toBeInTheDocument();
   });
 
   it("starts an externally selected runtime", async () => {

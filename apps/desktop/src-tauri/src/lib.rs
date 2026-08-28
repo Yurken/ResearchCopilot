@@ -354,8 +354,14 @@ pub fn run() {
                 app_data_dir.clone(),
                 app.path().resource_dir().ok(),
             ));
-            app.manage(opencode::OpenCodeRuntimeState::new(app_data_dir.clone()));
-            app.manage(pi_web::PiWebRuntimeState::new(app_data_dir.clone()));
+            app.manage(opencode::OpenCodeRuntimeState::new(
+                app_data_dir.clone(),
+                app.path().resource_dir().ok(),
+            ));
+            app.manage(pi_web::PiWebRuntimeState::new(
+                app_data_dir.clone(),
+                app.path().resource_dir().ok(),
+            ));
 
             configure_diagnostic_log_path(&app_data_dir);
             append_diagnostic_log(&format!(

@@ -14,6 +14,8 @@ const stopped: PiWebRuntimeSnapshot = {
   error: null,
   logs: [],
   pathAvailable: true,
+  bundledAvailable: false,
+  bundledExecutable: null,
   pathExecutable: "/opt/homebrew/bin/pi-web",
   source: "https://github.com/agegr/pi-web",
   dataHome: "/Users/researcher/.pi/agent",
@@ -28,7 +30,8 @@ describe("PiWebWorkspace", () => {
   it("shows Pi Web launch controls and the discovered executable", async () => {
     render(<PiWebWorkspace />);
     expect(await screen.findByRole("heading", { name: "启动 Pi Web" })).toBeInTheDocument();
-    expect(screen.getByText(/\/opt\/homebrew\/bin\/pi-web/)).toBeInTheDocument();
+    expect(screen.getByText("内置 Pi Web")).toBeInTheDocument();
+    expect(await screen.findByText(/\/opt\/homebrew\/bin\/pi-web/)).toBeInTheDocument();
   });
 
   it("starts an externally selected Pi Web runtime", async () => {

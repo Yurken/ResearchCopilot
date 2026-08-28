@@ -139,7 +139,9 @@ pub async fn validate_secure_version(executable: &Path) -> Result<String, String
 }
 pub fn resolve_executable(config: &OpenCodeRuntimeConfig) -> Result<PathBuf, String> {
     match config.mode {
-        OpenCodeRuntimeMode::Path => find_opencode()
+        // Bundled 正常应经 OpenCodeRuntimeState::resolve_mode_executable 解析
+        //（内置优先、缺失回退）；此处是绕过 state 直接调用时的兜底。
+        OpenCodeRuntimeMode::Bundled | OpenCodeRuntimeMode::Path => find_opencode()
             .ok_or_else(|| "未找到 OpenCode，请先安装或改为指定可执行文件".to_string()),
         OpenCodeRuntimeMode::External => {
             let executable = config
