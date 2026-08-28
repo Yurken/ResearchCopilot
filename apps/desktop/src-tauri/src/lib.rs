@@ -562,7 +562,7 @@ pub fn run() {
             opencode::opencode_runtime_start,
             opencode::opencode_runtime_stop,
             opencode::opencode_runtime_validate_external,
-            // Pi Web runtime
+            // Pi runtime
             pi_web::pi_web_runtime_status,
             pi_web::pi_web_runtime_configure,
             pi_web::pi_web_runtime_start,

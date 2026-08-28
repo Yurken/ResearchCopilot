@@ -119,7 +119,7 @@ impl RuntimeInner {
                 self.generation = self.generation.wrapping_add(1);
                 if self.phase != PiWebPhase::Stopped {
                     self.phase = PiWebPhase::Failed;
-                    self.error = Some(format!("Pi Web 进程已退出（{status}）"));
+                    self.error = Some(format!("Pi 进程已退出（{status}）"));
                 }
             }
             Ok(None) => {}
@@ -127,7 +127,7 @@ impl RuntimeInner {
                 self.child = None;
                 self.url = None;
                 self.phase = PiWebPhase::Failed;
-                self.error = Some(format!("无法读取 Pi Web 进程状态：{error}"));
+                self.error = Some(format!("无法读取 Pi 进程状态：{error}"));
             }
         }
     }
@@ -180,7 +180,7 @@ impl PiWebRuntimeState {
                 return Ok(spec);
             }
             return find_pi_web().map(PiWebLaunchSpec::direct).ok_or_else(|| {
-                "未找到内置 Pi Web 运行时或已安装的 Pi Web。可执行 pnpm pi-web:prepare-runtime 生成内置运行时，或执行 npm install -g @agegr/pi-web".to_string()
+                "未找到内置 Pi 运行时或已安装的 Pi。可执行 pnpm pi-web:prepare-runtime 生成内置运行时，或执行 npm install -g @agegr/pi-web".to_string()
             });
         }
         resolve_executable(config).map(PiWebLaunchSpec::direct)
@@ -209,12 +209,12 @@ fn read_config(app_data_dir: &Path) -> Option<PiWebRuntimeConfig> {
 
 fn write_config(path: &Path, config: &PiWebRuntimeConfig) -> Result<(), String> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| format!("创建 Pi Web 配置目录失败：{error}"))?;
+        fs::create_dir_all(parent).map_err(|error| format!("创建 Pi 配置目录失败：{error}"))?;
     }
     let content = serde_json::to_string_pretty(config)
-        .map_err(|error| format!("序列化 Pi Web 配置失败：{error}"))?;
+        .map_err(|error| format!("序列化 Pi 配置失败：{error}"))?;
     fs::write(path, format!("{content}\n"))
-        .map_err(|error| format!("保存 Pi Web 配置失败：{error}"))
+        .map_err(|error| format!("保存 Pi 配置失败：{error}"))
 }
 
 fn normalize_config(mut config: PiWebRuntimeConfig) -> PiWebRuntimeConfig {
@@ -259,7 +259,7 @@ fn workspace_dir(
     }
     let fallback = state.app_data_dir.join("pi-web/workspace");
     fs::create_dir_all(&fallback)
-        .map_err(|error| format!("创建默认 Pi Web 工作目录失败：{error}"))?;
+        .map_err(|error| format!("创建默认 Pi 工作目录失败：{error}"))?;
     Ok(fallback)
 }
 
@@ -327,7 +327,7 @@ pub async fn pi_web_runtime_configure(
         let mut inner = state.inner.lock().await;
         inner.refresh_child_status();
         if inner.child.is_some() {
-            return Err("请先停止 Pi Web，再切换运行时配置".to_string());
+            return Err("请先停止 Pi，再切换运行时配置".to_string());
         }
         write_config(&state.config_path(), &config)?;
         inner.config = config;
@@ -361,7 +361,7 @@ pub async fn pi_web_runtime_start(
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(error) => {
-                let message = format!("启动 Pi Web 失败：{error}");
+                let message = format!("启动 Pi 失败：{error}");
                 inner.phase = PiWebPhase::Failed;
                 inner.error = Some(message.clone());
                 return Err(message);
@@ -374,7 +374,7 @@ pub async fn pi_web_runtime_start(
         inner.child = Some(child);
         inner.url = Some(format!("http://127.0.0.1:{port}/"));
         inner.push_log(format!(
-            "[xiaoyan] Pi Web=http://127.0.0.1:{port}/ workspace={} data={}",
+            "[xiaoyan] Pi=http://127.0.0.1:{port}/ workspace={} data={}",
             workspace.display(),
             state.data_home(&config).display()
         ));
@@ -409,7 +409,7 @@ pub async fn pi_web_runtime_start(
             inner.phase = PiWebPhase::Failed;
             inner.url = None;
             inner.error =
-                Some("Pi Web 启动超时，请确认 Node.js 已升级到 22.19 或更高版本".to_string());
+                Some("Pi 启动超时，请确认 Node.js 已升级到 22.19 或更高版本".to_string());
             inner.child.take()
         };
         if let Some(child) = child {
@@ -447,7 +447,7 @@ pub async fn pi_web_runtime_validate_external(executable: String) -> Result<Stri
         ..PiWebRuntimeConfig::default()
     };
     let path = resolve_executable(&normalize_config(config))?;
-    Ok(format!("已识别 Pi Web：{}", path.display()))
+    Ok(format!("已识别 Pi：{}", path.display()))
 }
 
 #[cfg(test)]

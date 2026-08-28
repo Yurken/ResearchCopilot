@@ -27,29 +27,29 @@ describe("PiWebWorkspace", () => {
     invokeMock.mockImplementation(async (command: string) => command === "pi_web_runtime_status" ? stopped : { ...stopped, phase: "starting" });
   });
 
-  it("shows Pi Web launch controls and the discovered executable", async () => {
+  it("shows Pi launch controls and the discovered executable", async () => {
     render(<PiWebWorkspace />);
-    expect(await screen.findByRole("heading", { name: "启动 Pi Web" })).toBeInTheDocument();
-    expect(screen.getByText("内置 Pi Web")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "启动 Pi" })).toBeInTheDocument();
+    expect(screen.getByText("内置 Pi")).toBeInTheDocument();
     expect(await screen.findByText(/\/opt\/homebrew\/bin\/pi-web/)).toBeInTheDocument();
   });
 
-  it("starts an externally selected Pi Web runtime", async () => {
+  it("starts an externally selected Pi runtime", async () => {
     const user = userEvent.setup();
     render(<PiWebWorkspace />);
-    await screen.findByText("已安装 Pi Web");
-    await user.click(screen.getByRole("button", { name: /自定义 Pi Web/ }));
+    await screen.findByText("已安装 Pi");
+    await user.click(screen.getByRole("button", { name: /自定义 Pi/ }));
     await user.type(screen.getByLabelText("pi-web 可执行文件"), "/usr/local/bin/pi-web");
-    await user.click(screen.getByRole("button", { name: "启动 Pi Web" }));
+    await user.click(screen.getByRole("button", { name: "启动 Pi" }));
     await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("pi_web_runtime_configure", {
       config: expect.objectContaining({ mode: "external", externalExecutable: "/usr/local/bin/pi-web" }),
     }));
   });
 
-  it("embeds the full Pi Web page while running", async () => {
+  it("embeds the full Pi page while running", async () => {
     invokeMock.mockResolvedValueOnce({ ...stopped, phase: "running", url: "http://127.0.0.1:30142/" });
     render(<PiWebWorkspace />);
-    expect(await screen.findByTitle("Pi Web")).toHaveAttribute("src", "http://127.0.0.1:30142/");
-    expect(screen.getByRole("toolbar", { name: "Pi Web 运行控制" })).toBeInTheDocument();
+    expect(await screen.findByTitle("Pi")).toHaveAttribute("src", "http://127.0.0.1:30142/");
+    expect(screen.getByRole("toolbar", { name: "Pi 运行控制" })).toBeInTheDocument();
   });
 });

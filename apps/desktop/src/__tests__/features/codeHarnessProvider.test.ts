@@ -30,7 +30,7 @@ describe("代码助手切换", () => {
     expect(CODE_HARNESS_PATHS.opencode).toBe("/opencode");
   });
 
-  it("支持持久化 Pi Web 并映射独立路由", () => {
+  it("支持持久化 Pi 并映射独立路由", () => {
     persistCodeHarnessProvider("pi");
     expect(readCodeHarnessProvider()).toBe("pi");
     expect(CODE_HARNESS_PATHS.pi).toBe("/pi");

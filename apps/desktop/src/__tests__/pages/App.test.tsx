@@ -175,12 +175,12 @@ describe("App 路由与导航", () => {
     expect(screen.queryByLabelText("DSH")).not.toBeInTheDocument();
   });
 
-  it("代码助手切换为 Pi Web 后侧栏显示 Pi Web", async () => {
+  it("代码助手切换为 Pi 后侧栏显示 Pi", async () => {
     window.localStorage.setItem("rc:code-harness-provider", "pi");
     renderWithRouter(<App />);
-    await waitFor(() => expect(screen.getByLabelText("Pi Web")).toBeInTheDocument());
-    expect(screen.getByLabelText("Pi Web")).toHaveAttribute("href", "/pi");
-    expect(screen.getByLabelText("Pi Web").querySelector(".pi-web-icon")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText("Pi")).toBeInTheDocument());
+    expect(screen.getByLabelText("Pi")).toHaveAttribute("href", "/pi");
+    expect(screen.getByLabelText("Pi").querySelector(".pi-web-icon")).toBeInTheDocument();
     expect(screen.queryByLabelText("DSH")).not.toBeInTheDocument();
   });
 });

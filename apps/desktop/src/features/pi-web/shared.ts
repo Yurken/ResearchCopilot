@@ -38,5 +38,5 @@ export const PI_WEB_PHASE_LABELS: Record<PiWebRuntimePhase, string> = {
 
 export function formatPiWebError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error ?? "");
-  return message.trim() || "Pi Web 操作未完成，请查看运行日志。";
+  return message.trim() || "Pi 操作未完成，请查看运行日志。";
 }

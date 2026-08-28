@@ -18,7 +18,7 @@ export const CODE_HARNESS_LABELS: Record<CodeHarnessProvider, string> = {
   dsh: "DSH",
   codex: "Codex",
   opencode: "OpenCode",
-  pi: "Pi Web",
+  pi: "Pi",
 };
 
 export function isCodeHarnessProvider(value: unknown): value is CodeHarnessProvider {

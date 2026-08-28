@@ -32,7 +32,7 @@ const OPTIONS: Array<{
   },
   {
     id: "pi",
-    title: "Pi Web",
+    title: "Pi",
     description: "嵌入 Pi 的完整 Web 工作台、会话与技能管理。",
     icon: PiWebIcon,
   },

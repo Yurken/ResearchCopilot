@@ -119,7 +119,7 @@ pub fn path_available() -> bool {
     find_pi_web().is_some()
 }
 
-/// 一次 Pi Web 启动的程序与前置参数：已安装/自定义模式直接执行 pi-web 入口；
+/// 一次 Pi 启动的程序与前置参数：已安装/自定义模式直接执行 pi-web 入口；
 /// 内置模式执行小妍自带的 node 并以 resources 内的 pi-web.js 作为前置参数。
 #[derive(Debug, Clone)]
 pub struct PiWebLaunchSpec {
@@ -141,7 +141,7 @@ pub fn resolve_executable(config: &PiWebRuntimeConfig) -> Result<PathBuf, String
         // Bundled 正常应经 PiWebRuntimeState::resolve_launch 解析
         //（内置优先、缺失回退）；此处是绕过 state 直接调用时的兜底。
         PiWebRuntimeMode::Bundled | PiWebRuntimeMode::Path => find_pi_web().ok_or_else(|| {
-            "未找到 Pi Web，请先执行 npm install -g @agegr/pi-web，或指定可执行文件".to_string()
+            "未找到 Pi，请先执行 npm install -g @agegr/pi-web，或指定可执行文件".to_string()
         }),
         PiWebRuntimeMode::External => {
             let executable = config
@@ -149,10 +149,10 @@ pub fn resolve_executable(config: &PiWebRuntimeConfig) -> Result<PathBuf, String
                 .as_deref()
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-                .ok_or_else(|| "请先选择自定义 Pi Web 可执行文件".to_string())?;
+                .ok_or_else(|| "请先选择自定义 Pi 可执行文件".to_string())?;
             let path = Path::new(executable);
             if path.components().count() > 1 && !path.is_file() {
-                return Err("自定义 Pi Web 可执行文件不存在".to_string());
+                return Err("自定义 Pi 可执行文件不存在".to_string());
             }
             Ok(path.to_path_buf())
         }
@@ -224,7 +224,7 @@ pub fn launch_web(
 pub async fn stop_child(mut child: Child) -> Result<(), String> {
     if child
         .try_wait()
-        .map_err(|error| format!("读取 Pi Web 退出状态失败：{error}"))?
+        .map_err(|error| format!("读取 Pi 退出状态失败：{error}"))?
         .is_some()
     {
         return Ok(());
@@ -247,7 +247,7 @@ pub async fn stop_child(mut child: Child) -> Result<(), String> {
     child
         .kill()
         .await
-        .map_err(|error| format!("停止 Pi Web 失败：{error}"))?;
+        .map_err(|error| format!("停止 Pi 失败：{error}"))?;
     let _ = timeout(Duration::from_secs(5), child.wait()).await;
     Ok(())
 }
