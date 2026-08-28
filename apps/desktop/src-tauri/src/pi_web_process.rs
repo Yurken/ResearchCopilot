@@ -119,9 +119,28 @@ pub fn path_available() -> bool {
     find_pi_web().is_some()
 }
 
+/// 一次 Pi Web 启动的程序与前置参数：已安装/自定义模式直接执行 pi-web 入口；
+/// 内置模式执行小妍自带的 node 并以 resources 内的 pi-web.js 作为前置参数。
+#[derive(Debug, Clone)]
+pub struct PiWebLaunchSpec {
+    pub program: PathBuf,
+    pub prefix_args: Vec<PathBuf>,
+}
+
+impl PiWebLaunchSpec {
+    pub fn direct(executable: PathBuf) -> Self {
+        Self {
+            program: executable,
+            prefix_args: Vec::new(),
+        }
+    }
+}
+
 pub fn resolve_executable(config: &PiWebRuntimeConfig) -> Result<PathBuf, String> {
     match config.mode {
-        PiWebRuntimeMode::Path => find_pi_web().ok_or_else(|| {
+        // Bundled 正常应经 PiWebRuntimeState::resolve_launch 解析
+        //（内置优先、缺失回退）；此处是绕过 state 直接调用时的兜底。
+        PiWebRuntimeMode::Bundled | PiWebRuntimeMode::Path => find_pi_web().ok_or_else(|| {
             "未找到 Pi Web，请先执行 npm install -g @agegr/pi-web，或指定可执行文件".to_string()
         }),
         PiWebRuntimeMode::External => {
@@ -174,13 +193,14 @@ fn command_for(executable: &Path) -> Command {
 }
 
 pub fn launch_web(
-    executable: &Path,
+    spec: &PiWebLaunchSpec,
     workspace: &Path,
     agent_dir: Option<&Path>,
     port: u16,
 ) -> Command {
-    let mut command = command_for(executable);
+    let mut command = command_for(&spec.program);
     command
+        .args(&spec.prefix_args)
         .args([
             "--hostname",
             "127.0.0.1",

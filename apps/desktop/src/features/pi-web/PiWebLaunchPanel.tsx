@@ -50,7 +50,11 @@ export default function PiWebLaunchPanel({
   onDraftChange: <K extends keyof PiWebRuntimeConfig>(key: K, value: PiWebRuntimeConfig[K]) => void;
 }) {
   const [externalResult, setExternalResult] = useState("");
-  const canStart = draft.mode === "path" ? Boolean(runtime.snapshot?.pathAvailable) : Boolean(draft.externalExecutable?.trim());
+  const canStart = draft.mode === "bundled"
+    ? Boolean(runtime.snapshot?.bundledAvailable || runtime.snapshot?.pathAvailable)
+    : draft.mode === "path"
+      ? Boolean(runtime.snapshot?.pathAvailable)
+      : Boolean(draft.externalExecutable?.trim());
 
   const pickExecutable = async () => {
     const selected = await runtime.chooseFile("选择 pi-web 可执行文件");
@@ -79,10 +83,21 @@ export default function PiWebLaunchPanel({
         <Card padding="lg">
           <h3 className="text-sm font-semibold text-ink-primary">运行环境</h3>
           <p className="mt-1 text-xs leading-5 text-ink-tertiary">小妍分配随机 loopback 端口并禁止自动打开外部浏览器。Pi Web 仍以当前用户权限执行。</p>
-          <div className="mt-4 grid gap-1 rounded-[22px] p-1 sm:grid-cols-2" style={{ background: "var(--rc-chip-inset-bg)", boxShadow: "var(--rc-chip-inset-shadow)" }}>
+          <div className="mt-4 grid gap-1 rounded-[22px] p-1 sm:grid-cols-3" style={{ background: "var(--rc-chip-inset-bg)", boxShadow: "var(--rc-chip-inset-shadow)" }}>
+            <ModeOption mode="bundled" active={draft.mode === "bundled"} title="内置 Pi Web" description="小妍自带的官方 harness，无需安装" onSelect={(mode) => onDraftChange("mode", mode)} />
             <ModeOption mode="path" active={draft.mode === "path"} title="已安装 Pi Web" description="自动发现 npm 全局安装或 PATH 中的版本" onSelect={(mode) => onDraftChange("mode", mode)} />
             <ModeOption mode="external" active={draft.mode === "external"} title="自定义 Pi Web" description="手动指定自行维护的可执行文件" onSelect={(mode) => onDraftChange("mode", mode)} />
           </div>
+
+          {draft.mode === "bundled" && !runtime.snapshot?.bundledAvailable ? (
+            <div className="mt-4 flex gap-2.5 rounded-2xl border border-amber-700/15 bg-amber-50/60 px-3.5 py-3 text-amber-900">
+              <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+              <p className="text-xs leading-5">{runtime.snapshot?.pathAvailable
+                ? "当前构建未包含内置 Pi Web 运行时，将回退到已安装版本。可执行 pnpm pi-web:prepare-runtime 生成内置运行时。"
+                : "当前构建未包含内置 Pi Web 运行时，也未在环境中发现已安装版本。可执行 pnpm pi-web:prepare-runtime 生成内置运行时，或执行 npm install -g @agegr/pi-web。"}</p>
+            </div>
+          ) : null}
+          {draft.mode === "bundled" && runtime.snapshot?.bundledExecutable ? <p className="mt-3 text-xs text-ink-tertiary">内置运行时 {runtime.snapshot.bundledExecutable}</p> : null}
 
           {draft.mode === "path" && !runtime.snapshot?.pathAvailable ? (
             <div className="mt-4 flex gap-2.5 rounded-2xl border border-amber-700/15 bg-amber-50/60 px-3.5 py-3 text-amber-900">

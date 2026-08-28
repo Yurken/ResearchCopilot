@@ -27,6 +27,8 @@ const OPENCODE_SOURCE: &str = "https://github.com/anomalyco/opencode";
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum OpenCodeRuntimeMode {
+    /// 小妍自带的内置运行时（resources/opencode），缺失时回退到已安装版本
+    Bundled,
     Path,
     External,
 }
@@ -41,7 +43,7 @@ pub struct OpenCodeRuntimeConfig {
 impl Default for OpenCodeRuntimeConfig {
     fn default() -> Self {
         Self {
-            mode: OpenCodeRuntimeMode::Path,
+            mode: OpenCodeRuntimeMode::Bundled,
             external_executable: None,
             workspace_dir: None,
         }
@@ -65,6 +67,8 @@ pub struct OpenCodeRuntimeSnapshot {
     url: Option<String>,
     error: Option<String>,
     logs: Vec<String>,
+    bundled_available: bool,
+    bundled_executable: Option<String>,
     path_available: bool,
     path_executable: Option<String>,
     source: String,
@@ -125,18 +129,41 @@ impl RuntimeInner {
 #[derive(Clone)]
 pub struct OpenCodeRuntimeState {
     app_data_dir: PathBuf,
+    resource_dir: Option<PathBuf>,
     inner: Arc<Mutex<RuntimeInner>>,
 }
 impl OpenCodeRuntimeState {
-    pub fn new(app_data_dir: PathBuf) -> Self {
+    pub fn new(app_data_dir: PathBuf, resource_dir: Option<PathBuf>) -> Self {
         let config = read_config(&app_data_dir).unwrap_or_default();
         Self {
             app_data_dir,
+            resource_dir,
             inner: Arc::new(Mutex::new(RuntimeInner::new(config))),
         }
     }
     fn config_path(&self) -> PathBuf {
         self.app_data_dir.join("opencode/runtime.json")
+    }
+    /// 内置运行时：安装包 resources/opencode/runtime/bin 下的 opencode 二进制
+    fn bundled_executable(&self) -> Option<PathBuf> {
+        let binary = self
+            .resource_dir
+            .as_ref()?
+            .join("resources")
+            .join("opencode")
+            .join("runtime")
+            .join("bin")
+            .join(if cfg!(windows) { "opencode.exe" } else { "opencode" });
+        binary.is_file().then_some(binary)
+    }
+    /// 内置模式：优先小妍自带二进制，缺失时回退到环境中已安装的官方版本
+    fn resolve_mode_executable(&self, config: &OpenCodeRuntimeConfig) -> Result<PathBuf, String> {
+        if config.mode == OpenCodeRuntimeMode::Bundled {
+            return self.bundled_executable().or_else(find_opencode).ok_or_else(|| {
+                "未找到内置 OpenCode 运行时或已安装的 OpenCode。可执行 pnpm opencode:prepare-runtime 生成内置运行时，或按官方方式安装 OpenCode".to_string()
+            });
+        }
+        resolve_executable(config)
     }
 }
 fn read_config(app_data_dir: &Path) -> Option<OpenCodeRuntimeConfig> {
@@ -163,7 +190,7 @@ fn normalize_config(mut config: OpenCodeRuntimeConfig) -> OpenCodeRuntimeConfig 
         .filter(|value| !value.is_empty());
     config
 }
-fn validate_config(config: &OpenCodeRuntimeConfig) -> Result<(), String> {
+fn validate_config(state: &OpenCodeRuntimeState, config: &OpenCodeRuntimeConfig) -> Result<(), String> {
     if let Some(workspace) = config.workspace_dir.as_deref() {
         if !Path::new(workspace).is_dir() {
             return Err("所选工作目录不存在或不是文件夹".to_string());
@@ -171,6 +198,9 @@ fn validate_config(config: &OpenCodeRuntimeConfig) -> Result<(), String> {
     }
     if config.mode == OpenCodeRuntimeMode::External {
         resolve_executable(config)?;
+    }
+    if config.mode == OpenCodeRuntimeMode::Bundled {
+        state.resolve_mode_executable(config)?;
     }
     Ok(())
 }
@@ -195,6 +225,8 @@ async fn snapshot(state: &OpenCodeRuntimeState) -> OpenCodeRuntimeSnapshot {
         url: inner.url.clone(),
         error: inner.error.clone(),
         logs: inner.logs.iter().cloned().collect(),
+        bundled_executable: state.bundled_executable().map(|path| path.display().to_string()),
+        bundled_available: state.bundled_executable().is_some(),
         path_available: path_available(),
         path_executable: find_opencode().map(|path| path.display().to_string()),
         source: OPENCODE_SOURCE.to_string(),
@@ -238,7 +270,7 @@ pub async fn opencode_runtime_configure(
     config: OpenCodeRuntimeConfig,
 ) -> Result<OpenCodeRuntimeSnapshot, String> {
     let config = normalize_config(config);
-    validate_config(&config)?;
+    validate_config(state.inner(), &config)?;
     {
         let mut inner = state.inner.lock().await;
         inner.refresh_child_status();
@@ -266,7 +298,7 @@ pub async fn opencode_runtime_start(
         }
         let config = inner.config.clone();
         let workspace = workspace_dir(state.inner(), &config)?;
-        let executable = resolve_executable(&config)?;
+        let executable = state.resolve_mode_executable(&config)?;
         validate_secure_version(&executable).await?;
         let port = allocate_loopback_port()?;
         let url = format!("http://127.0.0.1:{port}/");
@@ -373,10 +405,10 @@ pub async fn opencode_runtime_validate_external(executable: String) -> Result<St
 mod tests {
     use super::*;
     #[test]
-    fn default_runtime_uses_path_mode() {
+    fn default_runtime_uses_bundled_mode() {
         assert_eq!(
             OpenCodeRuntimeConfig::default().mode,
-            OpenCodeRuntimeMode::Path
+            OpenCodeRuntimeMode::Bundled
         );
     }
 }

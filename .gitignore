@@ -224,6 +224,8 @@ apps/desktop/src-tauri/gen/schemas/windows-schema.json
 apps/desktop/src-tauri/*.db
 apps/desktop/src-tauri/resources/dsh/runtime/
 apps/desktop/src-tauri/resources/codex/runtime/
+apps/desktop/src-tauri/resources/opencode/runtime/
+apps/desktop/src-tauri/resources/pi-web/runtime/
 
 # Local workspace / generated artifacts
 .workbuddy/
