@@ -4,6 +4,12 @@ export interface OpenCodeRuntimeConfig { mode: OpenCodeRuntimeMode; externalExec
 export interface OpenCodeRuntimeSnapshot {
   phase: OpenCodeRuntimePhase; config: OpenCodeRuntimeConfig; url: string | null; error: string | null; logs: string[];
   bundledAvailable: boolean; bundledExecutable: string | null; pathAvailable: boolean; pathExecutable: string | null; source: string;
+  dataHome: string;
+}
+export interface OpenCodeApiImportResult {
+  provider: string;
+  model: string;
+  dataHome: string;
 }
 export const DEFAULT_OPENCODE_CONFIG: OpenCodeRuntimeConfig = { mode: "auto", externalExecutable: null, workspaceDir: null };
 export const OPENCODE_PHASE_LABELS: Record<OpenCodeRuntimePhase, string> = { stopped: "未启动", starting: "启动中", running: "运行中", failed: "启动失败" };

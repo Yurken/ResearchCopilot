@@ -5,6 +5,7 @@ import type { PiWebRuntimeConfig } from "./shared";
 import type { usePiWebRuntime } from "./usePiWebRuntime";
 import RuntimeExecutableSettings from "../code-harness/RuntimeExecutableSettings";
 import RuntimeSourceSummary from "../code-harness/RuntimeSourceSummary";
+import XiaoyanApiImportSection from "../code-harness/XiaoyanApiImportSection";
 
 export default function PiWebLaunchPanel({
   runtime,
@@ -16,6 +17,7 @@ export default function PiWebLaunchPanel({
   onDraftChange: <K extends keyof PiWebRuntimeConfig>(key: K, value: PiWebRuntimeConfig[K]) => void;
 }) {
   const [externalResult, setExternalResult] = useState("");
+  const phase = runtime.snapshot?.phase ?? "stopped";
   const usingCustom = draft.mode === "external" && Boolean(draft.externalExecutable?.trim());
   const canStart = usingCustom
     ? true
@@ -84,7 +86,15 @@ export default function PiWebLaunchPanel({
             </div>
           </div>
 
-          <details className="group mt-4 border-t border-nm-dark/10 pt-3">
+          <XiaoyanApiImportSection
+            description="将当前主模型同步到 Pi，凭据不会显示在页面中。"
+            resultText={runtime.apiImportResult ? `已配置 ${runtime.apiImportResult.model} · ${runtime.apiImportResult.provider}` : null}
+            busy={runtime.busy}
+            disabled={!canStart || phase === "starting"}
+            onImport={() => void runtime.configureAndImportXiaoyanApi(draft)}
+          />
+
+          <details className="group mt-4 pt-1">
             <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-medium text-ink-tertiary">
               <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" />
               高级设置

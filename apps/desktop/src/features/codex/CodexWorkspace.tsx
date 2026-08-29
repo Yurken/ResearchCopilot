@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, TerminalSquare } from "lucide-react";
+import { Loader2 } from "lucide-react";
+import CodexIcon from "./CodexIcon";
 import type { CodexRuntimeConfig } from "./shared";
 import { useCodexRuntime } from "./useCodexRuntime";
 import CodexLaunchPanel from "./CodexLaunchPanel";
 import CodexRuntimeControls from "./CodexRuntimeControls";
+import FloatingRuntimeControls from "../code-harness/FloatingRuntimeControls";
 
 export default function CodexWorkspace() {
   const runtime = useCodexRuntime();
@@ -37,7 +39,7 @@ export default function CodexWorkspace() {
         <header className="app-header flex flex-shrink-0 items-center justify-between gap-4 border-b border-nm-dark/10 px-6 pb-3">
           <div className="flex min-w-0 items-center gap-3">
             <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-2xl text-ink-primary" style={{ background: "var(--rc-chip-bg)", boxShadow: "var(--rc-chip-shadow)" }}>
-              <TerminalSquare className="h-4.5 w-4.5" />
+              <CodexIcon className="h-4.5 w-4.5" />
             </div>
             <h1 className="truncate text-[15px] font-semibold text-ink-primary">Codex Harness</h1>
           </div>
@@ -55,9 +57,9 @@ export default function CodexWorkspace() {
             allow="clipboard-read; clipboard-write"
             sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-modals"
           />
-          <div className="pointer-events-none absolute right-3 top-3 z-20">
-            <CodexRuntimeControls floating phase={phase} statusTone={statusTone} busy={runtime.busy} onRestart={() => void runtime.restart()} onStop={() => void runtime.stop()} />
-          </div>
+          <FloatingRuntimeControls provider="codex" label="Codex">
+            <CodexRuntimeControls phase={phase} statusTone={statusTone} busy={runtime.busy} onRestart={() => void runtime.restart()} onStop={() => void runtime.stop()} />
+          </FloatingRuntimeControls>
         </div>
       ) : (
         <CodexLaunchPanel runtime={runtime} draft={draft} onDraftChange={updateDraft} />

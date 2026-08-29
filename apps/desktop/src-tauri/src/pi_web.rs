@@ -1,4 +1,7 @@
+use crate::dsh_api_config::resolve_xiaoyan_api;
+use crate::pi_web_api_config::{write_pi_web_api_configuration, PiWebApiImportResult};
 use crate::runtime_installer::{managed_runtime_dir, ManagedRuntimeProvider};
+use crate::state::AppState;
 use crate::{
     append_diagnostic_log,
     pi_web_process::{
@@ -348,7 +351,14 @@ pub async fn pi_web_runtime_configure(
 #[tauri::command]
 pub async fn pi_web_runtime_start(
     state: State<'_, PiWebRuntimeState>,
+    app_state: State<'_, AppState>,
 ) -> Result<PiWebRuntimeSnapshot, String> {
+    let api_key = {
+        let settings = app_state.settings.read().await;
+        resolve_xiaoyan_api(&settings)
+            .ok()
+            .map(|profile| profile.api_key)
+    };
     let (stdout, stderr, generation, port) = {
         let mut inner = state.inner.lock().await;
         inner.refresh_child_status();
@@ -362,6 +372,9 @@ pub async fn pi_web_runtime_start(
         let port = allocate_loopback_port()?;
         let agent_dir = config.agent_dir.as_deref().map(Path::new);
         let mut command = launch_web(&launch, &workspace, agent_dir, port);
+        if let Some(api_key) = api_key.as_deref().filter(|value| !value.is_empty()) {
+            command.env("XIAOYAN_API_KEY", api_key);
+        }
         inner.phase = PiWebPhase::Starting;
         inner.error = None;
         inner.logs.clear();
@@ -443,6 +456,27 @@ pub async fn pi_web_runtime_stop(
     }
     append_diagnostic_log("pi-web: runtime stopped");
     Ok(snapshot(state.inner()).await)
+}
+
+#[tauri::command]
+pub async fn pi_web_runtime_import_xiaoyan_api(
+    runtime_state: State<'_, PiWebRuntimeState>,
+    app_state: State<'_, AppState>,
+) -> Result<PiWebApiImportResult, String> {
+    let profile = {
+        let settings = app_state.settings.read().await;
+        resolve_xiaoyan_api(&settings)?
+    };
+    let result = {
+        let mut inner = runtime_state.inner.lock().await;
+        inner.refresh_child_status();
+        if inner.child.is_some() {
+            return Err("请先停止 Pi，再同步小妍 API".to_string());
+        }
+        write_pi_web_api_configuration(&runtime_state.data_home(&inner.config), &profile)?
+    };
+    append_diagnostic_log("pi-web: xiaoyan api configuration updated");
+    Ok(result)
 }
 
 #[tauri::command]

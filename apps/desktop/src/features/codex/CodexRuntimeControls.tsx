@@ -6,24 +6,17 @@ export default function CodexRuntimeControls({
   phase,
   statusTone,
   busy,
-  floating = false,
   onRestart,
   onStop,
 }: {
   phase: CodexRuntimePhase;
   statusTone: string;
   busy: boolean;
-  floating?: boolean;
   onRestart: () => void;
   onStop: () => void;
 }) {
   return (
-    <div
-      role={floating ? "toolbar" : undefined}
-      aria-label={floating ? "Codex 运行控制" : undefined}
-      className={`flex flex-shrink-0 items-center gap-1.5 ${floating ? "pointer-events-auto rounded-2xl border border-nm-dark/10 p-1.5" : ""}`}
-      style={floating ? { background: "var(--rc-elevated)", boxShadow: "var(--rc-card-shadow)" } : undefined}
-    >
+    <div className="flex flex-shrink-0 items-center gap-1.5">
       <span
         className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium"
         style={{ background: "var(--rc-chip-inset-bg)", color: statusTone, boxShadow: "var(--rc-chip-inset-shadow)" }}

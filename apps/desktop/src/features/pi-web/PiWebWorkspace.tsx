@@ -5,24 +5,23 @@ import PiWebIcon from "./PiWebIcon";
 import PiWebLaunchPanel from "./PiWebLaunchPanel";
 import { PI_WEB_PHASE_LABELS, type PiWebRuntimeConfig, type PiWebRuntimePhase } from "./shared";
 import { usePiWebRuntime } from "./usePiWebRuntime";
+import FloatingRuntimeControls from "../code-harness/FloatingRuntimeControls";
 
 function RuntimeControls({
   phase,
   tone,
   busy,
-  floating,
   onRestart,
   onStop,
 }: {
   phase: PiWebRuntimePhase;
   tone: string;
   busy: boolean;
-  floating?: boolean;
   onRestart: () => void;
   onStop: () => void;
 }) {
   return (
-    <div role={floating ? "toolbar" : undefined} aria-label={floating ? "Pi 运行控制" : undefined} className={`flex items-center gap-1.5 ${floating ? "pointer-events-auto rounded-2xl border border-nm-dark/10 p-1.5" : ""}`} style={floating ? { background: "var(--rc-elevated)", boxShadow: "var(--rc-card-shadow)" } : undefined}>
+    <div className="flex items-center gap-1.5">
       <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium" style={{ background: "var(--rc-chip-inset-bg)", color: tone }}>
         <span className={`h-1.5 w-1.5 rounded-full ${phase === "starting" ? "animate-pulse" : ""}`} style={{ background: tone }} />
         {PI_WEB_PHASE_LABELS[phase]}
@@ -41,7 +40,10 @@ export default function PiWebWorkspace() {
   const phase = runtime.snapshot?.phase ?? "stopped";
   const isRunning = phase === "running" && Boolean(runtime.snapshot?.url);
   const tone = useMemo(() => phase === "running" ? "#248A3D" : phase === "failed" ? "#C9342C" : phase === "starting" ? "#B35C00" : "var(--rc-text-muted)", [phase]);
-  const updateDraft = <K extends keyof PiWebRuntimeConfig>(key: K, value: PiWebRuntimeConfig[K]) => setDraft((current) => ({ ...current, [key]: value }));
+  const updateDraft = <K extends keyof PiWebRuntimeConfig>(key: K, value: PiWebRuntimeConfig[K]) => {
+    setDraft((current) => ({ ...current, [key]: value }));
+    runtime.clearApiImportResult();
+  };
 
   if (runtime.loading) return <div className="flex h-full items-center justify-center bg-nm-bg"><Loader2 className="h-5 w-5 animate-spin text-ink-tertiary" /></div>;
   return (
@@ -55,7 +57,9 @@ export default function PiWebWorkspace() {
       {isRunning ? (
         <div className="relative min-h-0 flex-1 bg-white">
           <iframe key={runtime.snapshot?.url} src={runtime.snapshot?.url ?? undefined} title="Pi" className="absolute inset-0 h-full w-full border-0" allow="clipboard-read; clipboard-write" sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-modals allow-popups allow-popups-to-escape-sandbox" />
-          <div className="pointer-events-none absolute right-3 top-3 z-20"><RuntimeControls floating phase={phase} tone={tone} busy={runtime.busy} onRestart={() => void runtime.restart()} onStop={() => void runtime.stop()} /></div>
+          <FloatingRuntimeControls provider="pi" label="Pi">
+            <RuntimeControls phase={phase} tone={tone} busy={runtime.busy} onRestart={() => void runtime.restart()} onStop={() => void runtime.stop()} />
+          </FloatingRuntimeControls>
         </div>
       ) : <PiWebLaunchPanel runtime={runtime} draft={draft} onDraftChange={updateDraft} />}
     </div>

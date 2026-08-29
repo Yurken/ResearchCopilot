@@ -59,6 +59,7 @@
 
 - 代码工作区改为直接运行 DeepSeek 官方 Harness
 - 支持内置锁定版与本机外部 DSH，并可配置小妍 API
+- Codex、OpenCode、Pi 和 DSH 均可一键同步小妍主模型 API
 - DSH 运行状态、重启和停止操作改为悬浮工具条
 - DSH 首发已覆盖稳定启停、状态同步和 iframe 内小妍视线跟随
 - 发布流水线按平台构建并校验 DSH 与 Node 运行时

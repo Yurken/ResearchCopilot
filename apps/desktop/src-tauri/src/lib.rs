@@ -29,8 +29,10 @@ mod journal_partitions;
 mod links;
 mod llm;
 mod opencode;
+mod opencode_api_config;
 mod opencode_process;
 mod pi_web;
+mod pi_web_api_config;
 mod pi_web_process;
 mod rag;
 mod repositories;
@@ -554,12 +556,14 @@ pub fn run() {
             opencode::opencode_runtime_start,
             opencode::opencode_runtime_stop,
             opencode::opencode_runtime_validate_external,
+            opencode::opencode_runtime_import_xiaoyan_api,
             // Pi runtime
             pi_web::pi_web_runtime_status,
             pi_web::pi_web_runtime_configure,
             pi_web::pi_web_runtime_start,
             pi_web::pi_web_runtime_stop,
             pi_web::pi_web_runtime_validate_external,
+            pi_web::pi_web_runtime_import_xiaoyan_api,
             // Downloadable managed runtimes
             runtime_installer::runtime_download_managed,
             // Papers

@@ -5,6 +5,7 @@ import type { OpenCodeRuntimeConfig } from "./shared";
 import type { useOpenCodeRuntime } from "./useOpenCodeRuntime";
 import RuntimeExecutableSettings from "../code-harness/RuntimeExecutableSettings";
 import RuntimeSourceSummary from "../code-harness/RuntimeSourceSummary";
+import XiaoyanApiImportSection from "../code-harness/XiaoyanApiImportSection";
 
 export default function OpenCodeLaunchPanel({
   runtime,
@@ -19,6 +20,7 @@ export default function OpenCodeLaunchPanel({
   ) => void;
 }) {
   const [externalVersion, setExternalVersion] = useState("");
+  const phase = runtime.snapshot?.phase ?? "stopped";
   const usingCustom = draft.mode === "external" && Boolean(draft.externalExecutable?.trim());
   const canStart = usingCustom
     ? true
@@ -86,7 +88,15 @@ export default function OpenCodeLaunchPanel({
             </div>
           </div>
 
-          <details className="group mt-4 border-t border-nm-dark/10 pt-3">
+          <XiaoyanApiImportSection
+            description="将当前主模型同步到 OpenCode，凭据不会显示在页面中。"
+            resultText={runtime.apiImportResult ? `已配置 ${runtime.apiImportResult.model} · ${runtime.apiImportResult.provider}` : null}
+            busy={runtime.busy}
+            disabled={!canStart || phase === "starting"}
+            onImport={() => void runtime.configureAndImportXiaoyanApi(draft)}
+          />
+
+          <details className="group mt-4 pt-1">
             <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-medium text-ink-tertiary">
               <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" />
               高级设置

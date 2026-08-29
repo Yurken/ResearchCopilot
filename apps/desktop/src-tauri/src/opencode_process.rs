@@ -1,4 +1,5 @@
 use crate::opencode::{OpenCodeRuntimeConfig, OpenCodeRuntimeMode};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use std::{
     net::TcpListener,
     path::{Path, PathBuf},
@@ -168,25 +169,26 @@ pub fn allocate_loopback_port() -> Result<u16, String> {
         .map_err(|error| format!("无法读取本地端口：{error}"))?
         .port())
 }
+pub fn web_server_args(port: u16) -> Vec<String> {
+    vec![
+        "serve".to_string(),
+        "--hostname".to_string(),
+        "127.0.0.1".to_string(),
+        "--port".to_string(),
+        port.to_string(),
+    ]
+}
+
+pub fn web_page_url(port: u16, workspace: &Path) -> String {
+    let slug = URL_SAFE_NO_PAD.encode(workspace.to_string_lossy().as_bytes());
+    format!("http://127.0.0.1:{port}/{slug}/session")
+}
+
 pub fn launch_web(executable: &Path, workspace: &Path, port: u16) -> Command {
     let mut command = Command::new(executable);
     command
-        .args([
-            "web",
-            "--hostname",
-            "127.0.0.1",
-            "--port",
-            &port.to_string(),
-        ])
+        .args(web_server_args(port))
         .current_dir(workspace)
-        .env(
-            "BROWSER",
-            if cfg!(windows) {
-                "none"
-            } else {
-                "/usr/bin/true"
-            },
-        )
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -224,5 +226,22 @@ mod tests {
         assert_eq!(parse_version("1.18.4"), Some((1, 18, 4)));
         assert_eq!(parse_version("opencode 1.1.10"), Some((1, 1, 10)));
         assert!(parse_version("unknown").is_none());
+    }
+
+    #[test]
+    fn launches_a_headless_server_instead_of_opencode_web() {
+        assert_eq!(
+            web_server_args(4810),
+            ["serve", "--hostname", "127.0.0.1", "--port", "4810"]
+        );
+        assert!(!web_server_args(4810).iter().any(|arg| arg == "web"));
+    }
+
+    #[test]
+    fn embeds_the_workspace_session_page() {
+        let url = web_page_url(4810, Path::new("/tmp/xiaoyan-project"));
+        let slug = URL_SAFE_NO_PAD.encode("/tmp/xiaoyan-project");
+        assert_eq!(url, format!("http://127.0.0.1:4810/{slug}/session"));
+        assert!(!url.ends_with("4810/"));
     }
 }

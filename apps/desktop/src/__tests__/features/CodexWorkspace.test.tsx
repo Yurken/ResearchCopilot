@@ -85,6 +85,10 @@ describe("CodexWorkspace", () => {
 
     expect(await screen.findByTitle("Codex Web")).toHaveAttribute("src", "http://127.0.0.1:4501/");
     expect(screen.getByRole("toolbar", { name: "Codex 运行控制" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "拖动 Codex 运行控制" })).toHaveAttribute(
+      "aria-keyshortcuts",
+      "ArrowUp ArrowDown ArrowLeft ArrowRight Home",
+    );
     expect(screen.getByText("运行中")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "启动 Codex" })).not.toBeInTheDocument();
   });

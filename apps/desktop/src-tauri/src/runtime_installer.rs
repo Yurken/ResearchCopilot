@@ -12,6 +12,12 @@ use tauri::State;
 use tokio::{process::Command, sync::Mutex};
 
 const NODE_VERSION: &str = "22.19.0";
+// 官方源不可达时依次回退到 npmmirror 镜像；也可通过环境变量指定自定义镜像（优先尝试）。
+const NODE_DIST_MIRROR_ENV: &str = "XIAOYAN_NODE_DIST_MIRROR";
+const NODE_DIST_BASE_URLS: &[&str] = &[
+    "https://nodejs.org/dist",
+    "https://npmmirror.com/mirrors/node",
+];
 const NODE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const INSTALL_COMMAND_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
@@ -409,51 +415,62 @@ fn http_client() -> Result<reqwest::Client, String> {
         .map_err(|error| format!("创建 HTTP 客户端失败：{error}"))
 }
 
+fn node_dist_base_urls() -> Vec<String> {
+    let mut urls = Vec::new();
+    if let Ok(mirror) = std::env::var(NODE_DIST_MIRROR_ENV) {
+        let mirror = mirror.trim().trim_end_matches('/');
+        if !mirror.is_empty() {
+            urls.push(mirror.to_string());
+        }
+    }
+    urls.extend(NODE_DIST_BASE_URLS.iter().map(|url| url.to_string()));
+    urls
+}
+
+async fn download_node_archive(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, String> {
+    Ok(client
+        .get(url)
+        .send()
+        .await
+        .map_err(|error| format!("下载 Node 失败：{error}"))?
+        .error_for_status()
+        .map_err(|error| format!("下载 Node 失败：{error}"))?
+        .bytes()
+        .await
+        .map_err(|error| format!("读取 Node 响应失败：{error}"))?
+        .to_vec())
+}
+
 async fn download_node(runtime_dir: &Path, version: &str) -> Result<(), String> {
     let platform = node_platform_name()?;
     let client = http_client()?;
-
-    if cfg!(windows) {
-        let url = format!("https://nodejs.org/dist/v{version}/node-v{version}-{platform}.zip");
-        let bytes = client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|error| format!("下载 Node 失败：{error}"))?
-            .error_for_status()
-            .map_err(|error| format!("下载 Node 失败：{error}"))?
-            .bytes()
-            .await
-            .map_err(|error| format!("读取 Node 响应失败：{error}"))?;
-        extract_node_from_zip(&bytes, runtime_dir)?;
+    let extension = if cfg!(windows) {
+        "zip"
     } else if platform.starts_with("darwin") {
-        let url = format!("https://nodejs.org/dist/v{version}/node-v{version}-{platform}.tar.gz");
-        let bytes = client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|error| format!("下载 Node 失败：{error}"))?
-            .error_for_status()
-            .map_err(|error| format!("下载 Node 失败：{error}"))?
-            .bytes()
-            .await
-            .map_err(|error| format!("读取 Node 响应失败：{error}"))?;
-        extract_node_from_tar_gz(&bytes, runtime_dir)?;
+        "tar.gz"
     } else {
-        let url = format!("https://nodejs.org/dist/v{version}/node-v{version}-{platform}.tar.xz");
-        let bytes = client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|error| format!("下载 Node 失败：{error}"))?
-            .error_for_status()
-            .map_err(|error| format!("下载 Node 失败：{error}"))?
-            .bytes()
-            .await
-            .map_err(|error| format!("读取 Node 响应失败：{error}"))?;
-        extract_node_from_tar_xz(&bytes, runtime_dir)?;
+        "tar.xz"
+    };
+    let archive_name = format!("node-v{version}-{platform}.{extension}");
+
+    let mut errors = Vec::new();
+    for base_url in node_dist_base_urls() {
+        let url = format!("{base_url}/v{version}/{archive_name}");
+        match download_node_archive(&client, &url).await {
+            Ok(bytes) => {
+                return match extension {
+                    "zip" => extract_node_from_zip(&bytes, runtime_dir),
+                    "tar.gz" => extract_node_from_tar_gz(&bytes, runtime_dir),
+                    _ => extract_node_from_tar_xz(&bytes, runtime_dir),
+                };
+            }
+            Err(error) => errors.push(format!("{url}：{error}")),
+        }
     }
-    Ok(())
+    Err(format!(
+        "下载 Node 失败（官方源与镜像均不可达）：\n{}",
+        errors.join("\n")
+    ))
 }
 
 fn extract_node_from_tar<R: Read>(
