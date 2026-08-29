@@ -24,7 +24,14 @@ const stopped: PiWebRuntimeSnapshot = {
 describe("PiWebWorkspace", () => {
   beforeEach(() => {
     invokeMock.mockReset();
-    invokeMock.mockImplementation(async (command: string) => command === "pi_web_runtime_status" ? stopped : { ...stopped, phase: "starting" });
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "pi_web_runtime_status" || command === "pi_web_runtime_configure") return stopped;
+      if (command === "pi_web_runtime_start") return { ...stopped, phase: "starting" };
+      if (command === "pi_web_runtime_import_xiaoyan_api") {
+        return { provider: "xiaoyan", protocol: "openai-completions", model: "deepseek-chat", dataHome: stopped.dataHome };
+      }
+      throw new Error(`unexpected command: ${command}`);
+    });
   });
 
   it("shows Pi launch controls and the discovered executable", async () => {
@@ -51,5 +58,21 @@ describe("PiWebWorkspace", () => {
     render(<PiWebWorkspace />);
     expect(await screen.findByTitle("Pi")).toHaveAttribute("src", "http://127.0.0.1:30142/");
     expect(screen.getByRole("toolbar", { name: "Pi 运行控制" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "拖动 Pi 运行控制" })).toBeInTheDocument();
+  });
+
+  it("configures the current Xiaoyan API without exposing its credential", async () => {
+    const user = userEvent.setup();
+    render(<PiWebWorkspace />);
+    await screen.findByText("已发现本机 Pi");
+
+    await user.click(screen.getByRole("button", { name: "配置小妍 API" }));
+
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("pi_web_runtime_configure", {
+      config: stopped.config,
+    }));
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("pi_web_runtime_import_xiaoyan_api"));
+    expect(await screen.findByText("已配置 deepseek-chat · xiaoyan")).toBeInTheDocument();
+    expect(screen.queryByText(/sk-[a-z0-9]/i)).not.toBeInTheDocument();
   });
 });

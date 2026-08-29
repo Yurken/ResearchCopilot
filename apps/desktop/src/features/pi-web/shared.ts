@@ -22,6 +22,13 @@ export interface PiWebRuntimeSnapshot {
   dataHome: string;
 }
 
+export interface PiWebApiImportResult {
+  provider: string;
+  protocol: string;
+  model: string;
+  dataHome: string;
+}
+
 export const DEFAULT_PI_WEB_CONFIG: PiWebRuntimeConfig = {
   mode: "auto",
   externalExecutable: null,

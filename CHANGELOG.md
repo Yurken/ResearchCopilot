@@ -8,10 +8,12 @@
 - 代码助手新增 Codex 和 OpenCode 两种选择，可与 DSH 在设置中切换并使用独立入口。
 - Codex 新增小妍本地 Web 工作区，直接连接官方 `app-server`，支持线程历史、流式消息、命令记录、文件变更、审批与中止。
 - OpenCode 可直接托管本机或指定版本的官方 Web 页面，并复用其原生会话与模型配置。
+- Codex、OpenCode、Pi 和 DSH 均可一键把当前小妍主模型写入对应 Harness，凭据不会显示在页面中。
 
 ### 优化
 - Codex 不再额外启动 `codex exec` 执行任务，页面与运行时统一通过官方 app-server 协议通信。
 - Codex 与 OpenCode Web 服务都只监听随机 loopback 端口；停止或重启时同步回收子进程与页面服务。
+- OpenCode 改为启动无头 `serve`，不再弹出系统浏览器，并直接打开当前工作目录的会话页。
 
 ## [0.5.3] - 2026-08-17
 

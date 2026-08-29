@@ -7,6 +7,8 @@ export default function CodexIcon({ className, ...props }: SVGProps<SVGSVGElemen
     <svg
       {...props}
       className={`codex-icon ${className ?? ""}`.trim()}
+      width={18}
+      height={18}
       viewBox="0 0 24 24"
       fill="none"
       aria-hidden="true"

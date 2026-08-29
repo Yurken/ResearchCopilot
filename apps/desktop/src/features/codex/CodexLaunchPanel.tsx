@@ -1,17 +1,11 @@
 import { useState } from "react";
-import {
-  AlertTriangle,
-  Check,
-  ChevronDown,
-  FolderOpen,
-  KeyRound,
-  Play,
-} from "lucide-react";
+import { AlertTriangle, ChevronDown, FolderOpen, Play } from "lucide-react";
 import { Button, Card, Input } from "@research-copilot/ui";
 import type { CodexRuntimeConfig } from "./shared";
 import type { useCodexRuntime } from "./useCodexRuntime";
 import RuntimeExecutableSettings from "../code-harness/RuntimeExecutableSettings";
 import RuntimeSourceSummary from "../code-harness/RuntimeSourceSummary";
+import XiaoyanApiImportSection from "../code-harness/XiaoyanApiImportSection";
 
 export default function CodexLaunchPanel({
   runtime,
@@ -96,28 +90,13 @@ export default function CodexLaunchPanel({
             </div>
           </div>
 
-          <div className="mt-5 flex flex-col gap-3 border-y border-nm-dark/10 py-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0">
-              <p className="text-xs font-semibold text-ink-primary">小妍 API</p>
-              <p className="mt-0.5 text-xs leading-5 text-ink-tertiary">同步当前主模型到 Codex Harness。官方 harness 走 Responses API，Chat Completions 兼容接口可能无法使用。</p>
-              {runtime.apiImportResult && (
-                <p className="mt-1.5 flex items-center gap-1.5 text-xs font-medium text-emerald-700">
-                  <Check className="h-3.5 w-3.5" />
-                  已配置 {runtime.apiImportResult.model} · {runtime.apiImportResult.provider}
-                </p>
-              )}
-            </div>
-            <Button
-              variant="secondary"
-              size="sm"
-              className="flex-shrink-0"
-              onClick={() => void runtime.configureAndImportXiaoyanApi(draft)}
-              disabled={!canStart || runtime.busy || phase === "starting"}
-            >
-              <KeyRound className="h-3.5 w-3.5" />
-              配置小妍 API
-            </Button>
-          </div>
+          <XiaoyanApiImportSection
+            description="同步当前主模型到 Codex Harness。官方 harness 走 Responses API，Chat Completions 兼容接口可能无法使用。"
+            resultText={runtime.apiImportResult ? `已配置 ${runtime.apiImportResult.model} · ${runtime.apiImportResult.provider}` : null}
+            busy={runtime.busy}
+            disabled={!canStart || phase === "starting"}
+            onImport={() => void runtime.configureAndImportXiaoyanApi(draft)}
+          />
 
           <button
             type="button"

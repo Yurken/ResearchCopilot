@@ -5,10 +5,11 @@ import OpenCodeIcon from "./OpenCodeIcon";
 import OpenCodeLaunchPanel from "./OpenCodeLaunchPanel";
 import { OPENCODE_PHASE_LABELS, type OpenCodeRuntimeConfig, type OpenCodeRuntimePhase } from "./shared";
 import { useOpenCodeRuntime } from "./useOpenCodeRuntime";
+import FloatingRuntimeControls from "../code-harness/FloatingRuntimeControls";
 
-function RuntimeControls({ phase, tone, busy, floating, onRestart, onStop }: { phase: OpenCodeRuntimePhase; tone: string; busy: boolean; floating?: boolean; onRestart: () => void; onStop: () => void }) {
+function RuntimeControls({ phase, tone, busy, onRestart, onStop }: { phase: OpenCodeRuntimePhase; tone: string; busy: boolean; onRestart: () => void; onStop: () => void }) {
   return (
-    <div role={floating ? "toolbar" : undefined} aria-label={floating ? "OpenCode 运行控制" : undefined} className={`flex items-center gap-1.5 ${floating ? "pointer-events-auto rounded-2xl border border-nm-dark/10 p-1.5" : ""}`} style={floating ? { background: "var(--rc-elevated)", boxShadow: "var(--rc-card-shadow)" } : undefined}>
+    <div className="flex items-center gap-1.5">
       <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium" style={{ background: "var(--rc-chip-inset-bg)", color: tone }}><span className={`h-1.5 w-1.5 rounded-full ${phase === "starting" ? "animate-pulse" : ""}`} style={{ background: tone }} />{OPENCODE_PHASE_LABELS[phase]}</span>
       {phase === "running" && <><Button variant="ghost" size="sm" onClick={onRestart} disabled={busy}><RefreshCw className="h-3.5 w-3.5" />重启</Button><Button variant="secondary" size="sm" onClick={onStop} disabled={busy}><Square className="h-3 w-3" />停止</Button></>}
     </div>
@@ -22,13 +23,16 @@ export default function OpenCodeWorkspace() {
   const phase = runtime.snapshot?.phase ?? "stopped";
   const isRunning = phase === "running" && Boolean(runtime.snapshot?.url);
   const tone = useMemo(() => phase === "running" ? "#248A3D" : phase === "failed" ? "#C9342C" : phase === "starting" ? "#B35C00" : "var(--rc-text-muted)", [phase]);
-  const updateDraft = <K extends keyof OpenCodeRuntimeConfig>(key: K, value: OpenCodeRuntimeConfig[K]) => setDraft((current) => ({ ...current, [key]: value }));
+  const updateDraft = <K extends keyof OpenCodeRuntimeConfig>(key: K, value: OpenCodeRuntimeConfig[K]) => {
+    setDraft((current) => ({ ...current, [key]: value }));
+    runtime.clearApiImportResult();
+  };
 
   if (runtime.loading) return <div className="flex h-full items-center justify-center bg-nm-bg"><Loader2 className="h-5 w-5 animate-spin text-ink-tertiary" /></div>;
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-nm-bg">
       {!isRunning && <header className="app-header flex flex-shrink-0 items-center justify-between gap-4 border-b border-nm-dark/10 px-6 pb-3"><div className="flex items-center gap-3"><span className="flex h-9 w-9 items-center justify-center rounded-2xl" style={{ background: "var(--rc-chip-bg)", boxShadow: "var(--rc-chip-shadow)" }}><OpenCodeIcon className="h-4.5 w-4.5" /></span><h1 className="text-[15px] font-semibold text-ink-primary">OpenCode</h1></div><RuntimeControls phase={phase} tone={tone} busy={runtime.busy} onRestart={() => void runtime.restart()} onStop={() => void runtime.stop()} /></header>}
-      {isRunning ? <div className="relative min-h-0 flex-1 bg-white"><iframe key={runtime.snapshot?.url} src={runtime.snapshot?.url ?? undefined} title="OpenCode Web" className="absolute inset-0 h-full w-full border-0" allow="clipboard-read; clipboard-write" sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-modals allow-popups allow-popups-to-escape-sandbox" /><div className="pointer-events-none absolute right-3 top-3 z-20"><RuntimeControls floating phase={phase} tone={tone} busy={runtime.busy} onRestart={() => void runtime.restart()} onStop={() => void runtime.stop()} /></div></div> : <OpenCodeLaunchPanel runtime={runtime} draft={draft} onDraftChange={updateDraft} />}
+      {isRunning ? <div className="relative min-h-0 flex-1 bg-white"><iframe key={runtime.snapshot?.url} src={runtime.snapshot?.url ?? undefined} title="OpenCode Web" className="absolute inset-0 h-full w-full border-0" allow="clipboard-read; clipboard-write" sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-modals allow-popups allow-popups-to-escape-sandbox" /><FloatingRuntimeControls provider="opencode" label="OpenCode"><RuntimeControls phase={phase} tone={tone} busy={runtime.busy} onRestart={() => void runtime.restart()} onStop={() => void runtime.stop()} /></FloatingRuntimeControls></div> : <OpenCodeLaunchPanel runtime={runtime} draft={draft} onDraftChange={updateDraft} />}
     </div>
   );
 }

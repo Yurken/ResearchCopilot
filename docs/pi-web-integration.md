@@ -16,6 +16,16 @@
 
 默认沿用 `~/.pi/agent`，因此 CLI 与 Web 能看到同一批会话和配置。用户也可以指定 `PI_CODING_AGENT_DIR` 对应的数据目录。
 
+## 复用小妍 API
+
+启动页的“配置小妍 API”先保存当前运行方式，再把小妍代码角色实际生效的主模型同步为 Pi 的 `xiaoyan` provider。
+
+- OpenAI-compatible 端点映射为 `openai-completions`。
+- Anthropic-compatible 端点映射为 `anthropic-messages`。
+- provider 与模型写入当前 Pi 数据目录的 `models.json` 和 `settings.json`，不删除其他 provider。
+- API Key 写入当前数据目录的 `auth.json`，不经过前端状态或日志；Unix 下文件以 `0600` 权限原子替换。
+- 同步只允许在小妍管理的 Pi 进程停止时执行，避免与运行中的配置写入竞争。
+
 ## 边界
 
 - 服务固定监听随机 loopback 端口，不暴露到局域网。

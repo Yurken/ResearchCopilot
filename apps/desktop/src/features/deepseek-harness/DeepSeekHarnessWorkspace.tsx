@@ -1,16 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
-  Check,
   ChevronDown,
   FolderOpen,
-  KeyRound,
   Loader2,
   Play,
   RefreshCw,
   Square,
-  TerminalSquare,
 } from "lucide-react";
+import DeepSeekIcon from "./DeepSeekIcon";
 import { Button, Card, Input } from "@research-copilot/ui";
 import {
   DSH_PHASE_LABELS,
@@ -20,6 +18,8 @@ import {
 import { useDeepSeekHarnessRuntime } from "./useDeepSeekHarnessRuntime";
 import RuntimeExecutableSettings from "../code-harness/RuntimeExecutableSettings";
 import RuntimeSourceSummary from "../code-harness/RuntimeSourceSummary";
+import FloatingRuntimeControls from "../code-harness/FloatingRuntimeControls";
+import XiaoyanApiImportSection from "../code-harness/XiaoyanApiImportSection";
 
 function RuntimeLog({ logs }: { logs: string[] }) {
   if (logs.length === 0) return null;
@@ -43,24 +43,17 @@ function RuntimeControls({
   phase,
   statusTone,
   busy,
-  floating = false,
   onRestart,
   onStop,
 }: {
   phase: DshRuntimePhase;
   statusTone: string;
   busy: boolean;
-  floating?: boolean;
   onRestart: () => void;
   onStop: () => void;
 }) {
   return (
-    <div
-      role={floating ? "toolbar" : undefined}
-      aria-label={floating ? "DSH 运行控制" : undefined}
-      className={`flex flex-shrink-0 items-center gap-1.5 ${floating ? "pointer-events-auto rounded-2xl border border-nm-dark/10 p-1.5" : ""}`}
-      style={floating ? { background: "var(--rc-elevated)", boxShadow: "var(--rc-card-shadow)" } : undefined}
-    >
+    <div className="flex flex-shrink-0 items-center gap-1.5">
       <span
         className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium"
         style={{ background: "var(--rc-chip-inset-bg)", color: statusTone, boxShadow: "var(--rc-chip-inset-shadow)" }}
@@ -159,7 +152,7 @@ export default function DeepSeekHarnessWorkspace() {
               className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-2xl text-ink-primary"
               style={{ background: "var(--rc-chip-bg)", boxShadow: "var(--rc-chip-shadow)" }}
             >
-              <TerminalSquare className="h-4.5 w-4.5" />
+              <DeepSeekIcon className="h-4.5 w-4.5" />
             </div>
             <h1 className="truncate text-[15px] font-semibold text-ink-primary">DeepSeek Harness</h1>
           </div>
@@ -183,16 +176,19 @@ export default function DeepSeekHarnessWorkspace() {
             allow="clipboard-read; clipboard-write"
             sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-modals allow-popups allow-popups-to-escape-sandbox"
           />
-          <div className="pointer-events-none absolute right-3 top-3 z-20 md:right-[11.5rem]">
+          <FloatingRuntimeControls
+            provider="dsh"
+            label="DSH"
+            initialPositionClassName="right-3 top-3 md:right-[11.5rem]"
+          >
             <RuntimeControls
-              floating
               phase={phase}
               statusTone={statusTone}
               busy={runtime.busy}
               onRestart={() => void runtime.restart()}
               onStop={() => void runtime.stop()}
             />
-          </div>
+          </FloatingRuntimeControls>
         </div>
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-8">
@@ -237,28 +233,13 @@ export default function DeepSeekHarnessWorkspace() {
                 </div>
               </div>
 
-              <div className="mt-5 flex flex-col gap-3 border-y border-nm-dark/10 py-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold text-ink-primary">小妍 API</p>
-                  <p className="mt-0.5 text-xs leading-5 text-ink-tertiary">将当前主模型同步到 DSH，凭据不会显示在页面中。</p>
-                  {runtime.apiImportResult && (
-                    <p className="mt-1.5 flex items-center gap-1.5 text-xs font-medium text-emerald-700">
-                      <Check className="h-3.5 w-3.5" />
-                      已配置 {runtime.apiImportResult.model} · {runtime.apiImportResult.route}
-                    </p>
-                  )}
-                </div>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  className="flex-shrink-0"
-                  onClick={() => void runtime.configureAndImportXiaoyanApi(draft)}
-                  disabled={!canStart || runtime.busy || phase === "starting"}
-                >
-                  <KeyRound className="h-3.5 w-3.5" />
-                  配置小妍 API
-                </Button>
-              </div>
+              <XiaoyanApiImportSection
+                description="将当前主模型同步到 DSH，凭据不会显示在页面中。"
+                resultText={runtime.apiImportResult ? `已配置 ${runtime.apiImportResult.model} · ${runtime.apiImportResult.route}` : null}
+                busy={runtime.busy}
+                disabled={!canStart || phase === "starting"}
+                onImport={() => void runtime.configureAndImportXiaoyanApi(draft)}
+              />
 
               <button
                 type="button"

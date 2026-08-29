@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   DEFAULT_PI_WEB_CONFIG,
   formatPiWebError,
+  type PiWebApiImportResult,
   type PiWebRuntimeConfig,
   type PiWebRuntimeSnapshot,
 } from "./shared";
@@ -12,6 +13,7 @@ export function usePiWebRuntime() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [apiImportResult, setApiImportResult] = useState<PiWebApiImportResult | null>(null);
   const sequence = useRef(0);
   const pendingOperations = useRef(0);
 
@@ -88,6 +90,26 @@ export function usePiWebRuntime() {
       endOperation();
     }
   }, [beginOperation, endOperation]);
+  const configureAndImportXiaoyanApi = useCallback(async (config: PiWebRuntimeConfig) => {
+    const request = ++sequence.current;
+    beginOperation();
+    setError("");
+    setApiImportResult(null);
+    try {
+      const configured = await invoke<PiWebRuntimeSnapshot>("pi_web_runtime_configure", { config });
+      const result = await invoke<PiWebApiImportResult>("pi_web_runtime_import_xiaoyan_api");
+      if (request === sequence.current) {
+        setSnapshot(configured);
+        setApiImportResult(result);
+      }
+      return result;
+    } catch (cause) {
+      if (request === sequence.current) setError(formatPiWebError(cause));
+      return null;
+    } finally {
+      endOperation();
+    }
+  }, [beginOperation, endOperation]);
   const chooseFile = useCallback(async (title: string) => {
     const { open } = await import("@tauri-apps/plugin-dialog");
     const selected = await open({ title, multiple: false, directory: false });
@@ -105,11 +127,14 @@ export function usePiWebRuntime() {
     loading,
     busy,
     error,
+    apiImportResult,
     refresh,
     saveAndStart,
     stop,
     restart,
     validateExternal,
+    configureAndImportXiaoyanApi,
+    clearApiImportResult: () => setApiImportResult(null),
     chooseFile,
     chooseDirectory,
   };

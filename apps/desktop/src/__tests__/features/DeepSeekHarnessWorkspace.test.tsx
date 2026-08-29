@@ -94,6 +94,7 @@ describe("DeepSeekHarnessWorkspace", () => {
     expect(frame).toHaveAttribute("src", "http://127.0.0.1:63244");
     expect(frame).toHaveAttribute("sandbox", expect.stringContaining("allow-scripts"));
     expect(screen.getByRole("toolbar", { name: "DSH 运行控制" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "拖动 DSH 运行控制" })).toBeInTheDocument();
     expect(screen.getByText("运行中")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "重启" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "停止" })).toBeInTheDocument();

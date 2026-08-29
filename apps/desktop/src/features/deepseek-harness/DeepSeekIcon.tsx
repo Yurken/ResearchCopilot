@@ -6,6 +6,8 @@ export default function DeepSeekIcon({ className, ...props }: SVGProps<SVGSVGEle
     <svg
       {...props}
       className={`deepseek-icon ${className ?? ""}`.trim()}
+      width={18}
+      height={18}
       viewBox="0 0 23.16 17.04"
       fill="none"
       aria-hidden="true"

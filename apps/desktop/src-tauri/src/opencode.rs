@@ -1,9 +1,15 @@
+use crate::dsh_api_config::resolve_xiaoyan_api;
+use crate::opencode_api_config::{
+    opencode_auth_path, write_opencode_api_configuration, OpenCodeApiImportResult,
+    OPENCODE_OVERLAY_FILE,
+};
 use crate::runtime_installer::{managed_runtime_dir, ManagedRuntimeProvider};
+use crate::state::AppState;
 use crate::{
     append_diagnostic_log,
     opencode_process::{
         allocate_loopback_port, find_opencode, launch_web, path_available, resolve_executable,
-        stop_child, validate_secure_version,
+        stop_child, validate_secure_version, web_page_url,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -74,6 +80,7 @@ pub struct OpenCodeRuntimeSnapshot {
     path_available: bool,
     path_executable: Option<String>,
     source: String,
+    data_home: String,
 }
 
 struct RuntimeInner {
@@ -167,6 +174,9 @@ impl OpenCodeRuntimeState {
             OpenCodeRuntimeMode::Path | OpenCodeRuntimeMode::External => resolve_executable(config),
         }
     }
+    fn data_home(&self) -> PathBuf {
+        self.app_data_dir.join("opencode")
+    }
 }
 fn read_config(app_data_dir: &Path) -> Option<OpenCodeRuntimeConfig> {
     serde_json::from_str(&fs::read_to_string(app_data_dir.join("opencode/runtime.json")).ok()?).ok()
@@ -246,6 +256,7 @@ async fn snapshot(state: &OpenCodeRuntimeState) -> OpenCodeRuntimeSnapshot {
         path_available: path_available(),
         path_executable: find_opencode().map(|path| path.display().to_string()),
         source: OPENCODE_SOURCE.to_string(),
+        data_home: state.data_home().display().to_string(),
     }
 }
 async fn consume_output(
@@ -304,8 +315,15 @@ pub async fn opencode_runtime_configure(
 #[tauri::command]
 pub async fn opencode_runtime_start(
     state: State<'_, OpenCodeRuntimeState>,
+    app_state: State<'_, AppState>,
 ) -> Result<OpenCodeRuntimeSnapshot, String> {
-    let (stdout, stderr, generation) = {
+    let api_key = {
+        let settings = app_state.settings.read().await;
+        resolve_xiaoyan_api(&settings)
+            .ok()
+            .map(|profile| profile.api_key)
+    };
+    let (stdout, stderr, generation, port) = {
         let mut inner = state.inner.lock().await;
         inner.refresh_child_status();
         if inner.child.is_some() {
@@ -317,11 +335,19 @@ pub async fn opencode_runtime_start(
         let executable = state.resolve_mode_executable(&config)?;
         validate_secure_version(&executable).await?;
         let port = allocate_loopback_port()?;
-        let url = format!("http://127.0.0.1:{port}/");
+        let url = web_page_url(port, &workspace);
         inner.phase = OpenCodePhase::Starting;
         inner.error = None;
         inner.logs.clear();
-        let mut child = match launch_web(&executable, &workspace, port).spawn() {
+        let overlay = state.data_home().join(OPENCODE_OVERLAY_FILE);
+        let mut command = launch_web(&executable, &workspace, port);
+        if overlay.is_file() {
+            command.env("OPENCODE_CONFIG", overlay);
+        }
+        if let Some(api_key) = api_key.as_deref().filter(|value| !value.is_empty()) {
+            command.env("XIAOYAN_API_KEY", api_key);
+        }
+        let mut child = match command.spawn() {
             Ok(child) => child,
             Err(error) => {
                 let message = format!("启动 OpenCode 失败：{error}");
@@ -340,7 +366,7 @@ pub async fn opencode_runtime_start(
             "[xiaoyan] OpenCode Web={url} workspace={}",
             workspace.display()
         ));
-        (stdout, stderr, generation)
+        (stdout, stderr, generation, port)
     };
     if let Some(stdout) = stdout {
         tauri::async_runtime::spawn(consume_output(
@@ -358,17 +384,7 @@ pub async fn opencode_runtime_start(
             generation,
         ));
     }
-    if wait_for_loopback({
-        let inner = state.inner.lock().await;
-        inner
-            .url
-            .as_deref()
-            .and_then(|url| url.trim_end_matches('/').rsplit(':').next())
-            .and_then(|value| value.parse().ok())
-            .unwrap_or(0)
-    })
-    .await
-    {
+    if wait_for_loopback(port).await {
         let mut inner = state.inner.lock().await;
         inner.refresh_child_status();
         if inner.child.is_some() {
@@ -408,6 +424,31 @@ pub async fn opencode_runtime_stop(
     append_diagnostic_log("opencode: web runtime stopped");
     Ok(snapshot(state.inner()).await)
 }
+#[tauri::command]
+pub async fn opencode_runtime_import_xiaoyan_api(
+    runtime_state: State<'_, OpenCodeRuntimeState>,
+    app_state: State<'_, AppState>,
+) -> Result<OpenCodeApiImportResult, String> {
+    let profile = {
+        let settings = app_state.settings.read().await;
+        resolve_xiaoyan_api(&settings)?
+    };
+    let result = {
+        let mut inner = runtime_state.inner.lock().await;
+        inner.refresh_child_status();
+        if inner.child.is_some() {
+            return Err("请先停止 OpenCode，再同步小妍 API".to_string());
+        }
+        write_opencode_api_configuration(
+            &runtime_state.data_home(),
+            &opencode_auth_path()?,
+            &profile,
+        )?
+    };
+    append_diagnostic_log("opencode: xiaoyan api configuration updated");
+    Ok(result)
+}
+
 #[tauri::command]
 pub async fn opencode_runtime_validate_external(executable: String) -> Result<String, String> {
     let executable = executable.trim();

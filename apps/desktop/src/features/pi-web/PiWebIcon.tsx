@@ -8,6 +8,8 @@ export default function PiWebIcon({ className }: { className?: string }) {
       src={iconUrl}
       alt=""
       aria-hidden="true"
+      width={18}
+      height={18}
       className={`pi-web-icon rounded-[3px] ${className ?? ""}`.trim()}
       draggable={false}
     />
