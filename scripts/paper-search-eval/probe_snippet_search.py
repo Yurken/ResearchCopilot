@@ -76,7 +76,7 @@ def fetch_snippets(
     )
     request = urllib.request.Request(
         f"{SNIPPET_URL}?{params}",
-        headers={"User-Agent": "xiaoyan-paper-search-eval/0.5.3", "x-api-key": api_key},
+        headers={"User-Agent": "xiaoyan-paper-search-eval/0.5.4", "x-api-key": api_key},
     )
     last_error: Exception | None = None
     for attempt in range(4):

@@ -1,6 +1,6 @@
 {
   "name": "@research-copilot/mobile",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "license": "Apache-2.0",
   "private": true,
   "main": "expo-router/entry",

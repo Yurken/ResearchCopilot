@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 const SEMANTIC_SCHOLAR_GRAPH_URL: &str = "https://api.semanticscholar.org/graph/v1/paper";
-const SEMANTIC_SCHOLAR_USER_AGENT: &str = "xiaoyan-desktop/0.5.3";
+const SEMANTIC_SCHOLAR_USER_AGENT: &str = "xiaoyan-desktop/0.5.4";
 const PAPER_FIELDS: &str =
     "paperId,corpusId,title,abstract,year,venue,url,citationCount,publicationDate,authors,openAccessPdf";
 
