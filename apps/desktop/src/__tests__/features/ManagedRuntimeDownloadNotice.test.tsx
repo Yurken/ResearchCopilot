@@ -34,4 +34,22 @@ describe("ManagedRuntimeDownloadNotice", () => {
     }));
     expect(onInstalled).toHaveBeenCalledOnce();
   });
+
+  it("explains that a first-time background install may take several minutes", async () => {
+    invokeMock.mockImplementation(() => new Promise(() => undefined));
+    const user = userEvent.setup();
+    render(
+      <ManagedRuntimeDownloadNotice
+        provider="dsh"
+        label="DSH"
+        available={false}
+        onInstalled={() => undefined}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "一键安装" }));
+
+    expect(screen.getByText("正在后台安装 DSH，首次下载可能需要数分钟，请勿关闭小妍。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "安装中…" })).toBeDisabled();
+  });
 });
