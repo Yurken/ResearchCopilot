@@ -9,7 +9,11 @@ use std::{
     time::Duration,
 };
 use tauri::State;
-use tokio::{process::Command, sync::Mutex};
+use tokio::sync::Mutex;
+
+mod command;
+
+use command::{resolve_npm, run_command, run_npm_install};
 
 const NODE_VERSION: &str = "22.19.0";
 // 官方源不可达时依次回退到 npmmirror 镜像；也可通过环境变量指定自定义镜像（优先尝试）。
@@ -19,7 +23,6 @@ const NODE_DIST_BASE_URLS: &[&str] = &[
     "https://npmmirror.com/mirrors/node",
 ];
 const NODE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(10 * 60);
-const INSTALL_COMMAND_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 #[derive(Debug, Clone, Copy, Deserialize, Eq, Hash, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -309,105 +312,6 @@ fn user_home_dir() -> Result<PathBuf, String> {
         .ok_or_else(|| "无法确定用户主目录".to_string())
 }
 
-async fn run_command(
-    program: &str,
-    args: &[&str],
-    envs: &[(&str, String)],
-    current_dir: Option<&Path>,
-) -> Result<(), String> {
-    let mut command = Command::new(program);
-    command.args(args);
-    for (key, value) in envs {
-        command.env(key, value);
-    }
-    if let Some(dir) = current_dir {
-        command.current_dir(dir);
-    }
-    // 超时后 future 被 drop，kill_on_drop 确保子进程随之终止，不会留下
-    // 悬挂的安装脚本占住 provider 的并发锁。
-    command.kill_on_drop(true);
-    let output = tokio::time::timeout(INSTALL_COMMAND_TIMEOUT, command.output())
-        .await
-        .map_err(|_| {
-            format!(
-                "安装命令超时（{program}，超过 {} 分钟）",
-                INSTALL_COMMAND_TIMEOUT.as_secs() / 60
-            )
-        })?
-        .map_err(|error| {
-            format!(
-                "运行安装命令失败（{program}）：{error}\n请确认已安装 {program} 且在 PATH 中可用"
-            )
-        })?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        return Err(format!(
-            "安装命令退出失败（{}）：{}\nstdout：{}",
-            output.status, stderr, stdout
-        ));
-    }
-    Ok(())
-}
-
-async fn probe_program(program: &str, args: &[&str]) -> bool {
-    Command::new(program)
-        .args(args)
-        .output()
-        .await
-        .map(|output| output.status.success())
-        .unwrap_or(false)
-}
-
-/// 解析可用的 npm。桌面 GUI 进程不继承登录 shell 的 PATH，直接 spawn
-/// 失败时回退到登录 shell 中查找（与 pi_web_process 的本机发现策略一致）。
-async fn resolve_npm() -> Result<String, String> {
-    const HINT: &str =
-        "未找到 npm：托管运行时安装需要 npm，请先安装 Node.js（https://nodejs.org）后重试";
-    if cfg!(windows) {
-        if probe_program("cmd.exe", &["/c", "npm", "--version"]).await {
-            return Ok("npm".to_string());
-        }
-        return Err(HINT.to_string());
-    }
-    if probe_program("npm", &["--version"]).await {
-        return Ok("npm".to_string());
-    }
-    #[cfg(unix)]
-    {
-        if let Some(path) = login_shell_lookup("npm") {
-            if probe_program(&path, &["--version"]).await {
-                return Ok(path);
-            }
-        }
-    }
-    Err(HINT.to_string())
-}
-
-#[cfg(unix)]
-fn login_shell_lookup(program: &str) -> Option<String> {
-    let shell = if Path::new("/bin/zsh").is_file() {
-        "/bin/zsh"
-    } else {
-        "/bin/bash"
-    };
-    let output = std::process::Command::new(shell)
-        .args(["-lic", &format!("command -v {program}")])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    // 登录 shell 可能输出 MOTD 等杂音，取最后一行非空输出。
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(str::to_string)
-        .last()
-        .filter(|line| Path::new(line).is_file())
-}
-
 fn http_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .timeout(NODE_DOWNLOAD_TIMEOUT)
@@ -534,29 +438,6 @@ fn extract_node_from_zip(bytes: &[u8], runtime_dir: &Path) -> Result<(), String>
         }
     }
     Err("Node zip 归档中未找到 node.exe".to_string())
-}
-
-async fn run_npm_install(
-    npm: &str,
-    runtime_dir: &Path,
-    package: &str,
-    version: &str,
-) -> Result<(), String> {
-    let spec = format!("{package}@{version}");
-    let prefix = runtime_dir.display().to_string();
-    if cfg!(windows) {
-        // On Windows npm is a .cmd file; run it through cmd.exe /c so the
-        // extension is resolved reliably and quoted args are handled.
-        run_command(
-            "cmd.exe",
-            &["/c", npm, "install", "--prefix", &prefix, &spec],
-            &[],
-            None,
-        )
-        .await
-    } else {
-        run_command(npm, &["install", "--prefix", &prefix, &spec], &[], None).await
-    }
 }
 
 async fn install_codex(runtime_dir: &Path, manifest: &ProviderManifest) -> Result<(), String> {

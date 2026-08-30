@@ -48,7 +48,9 @@ export default function ManagedRuntimeDownloadNotice({
         <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
         <div className="min-w-0 flex-1">
           <p className="text-xs leading-5">
-            未找到本机 {label}。可一键安装到小妍私有目录，不会修改系统环境。
+            {download.downloading
+              ? `正在后台安装 ${label}，首次下载可能需要数分钟，请勿关闭小妍。`
+              : `未找到本机 ${label}。可一键安装到小妍私有目录，不会修改系统环境。`}
           </p>
           {download.error ? <p className="mt-1 text-xs leading-5 text-red-700">{download.error}</p> : null}
         </div>
@@ -59,7 +61,7 @@ export default function ManagedRuntimeDownloadNotice({
           onClick={() => void download.download()}
         >
           <Download className="h-3.5 w-3.5" />
-          {download.downloading ? "安装中" : "一键安装"}
+          {download.downloading ? "安装中…" : "一键安装"}
         </Button>
       </div>
     </div>
