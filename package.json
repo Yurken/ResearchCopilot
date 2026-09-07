@@ -44,7 +44,7 @@
   },
   "devDependencies": {
     "@types/react": "^19.2.14",
-    "turbo": "^2.10.11"
+    "turbo": "^2.10.12"
   },
   "packageManager": "pnpm@9.0.0",
   "engines": {
